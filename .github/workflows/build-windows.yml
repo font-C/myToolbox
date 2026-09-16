@@ -10,6 +10,10 @@ jobs:
   build:
     runs-on: windows-latest
 
+    # 允许创建/更新 GitHub Release（tauri-action 上传安装包）
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
