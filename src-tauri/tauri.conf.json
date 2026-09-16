@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "工具箱",
+  "productName": "MyToolbox",
   "version": "0.1.0",
   "identifier": "com.local.toolbox",
   "build": {
@@ -32,11 +32,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "windows": {
-      "nsis": {
-        "fileName": "MyToolbox_${version}_${arch}"
-      }
-    }
+    ]
   }
 }
