@@ -1,0 +1,51 @@
+name: build-windows
+
+on:
+  workflow_dispatch: # 手动触发
+  push:
+    tags:
+      - 'v*' # 推送 v0.1.0 之类标签时自动打包
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo
+            src-tauri/target
+          key: ${{ runner.os }}-tauri-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-tauri-
+
+      - name: Build & bundle Windows app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: '工具箱 v__VERSION__'
+          releaseBody: 'Windows 版打包产物见附件（.exe / NSIS 安装包）。'
+          releaseDraft: false
+          prerelease: false
