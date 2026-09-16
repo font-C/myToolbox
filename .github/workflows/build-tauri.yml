@@ -1,0 +1,78 @@
+name: build-tauri
+
+on:
+  workflow_dispatch: # 手动触发
+  push:
+    tags:
+      - 'v*' # 推送 v0.1.0 之类标签时自动打包
+
+jobs:
+  build:
+    permissions:
+      contents: write # 创建/更新 GitHub Release（tauri-action 上传安装包）
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis # Windows 只用 NSIS，跳过 MSI/WiX 脆弱链路
+            rust_targets: x86_64-pc-windows-msvc
+          - os: macos-latest
+            bundles: app,dmg
+            rust_targets: x86_64-apple-darwin,aarch64-apple-darwin
+          - os: ubuntu-latest
+            bundles: deb,appimage
+            rust_targets: x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: (Linux) Install system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev \
+            libappindicator3-dev librsvg2-dev patchelf librsvg2-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo
+            src-tauri/target
+          key: ${{ matrix.os }}-tauri-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.os }}-tauri-
+
+      - name: Build & bundle ${{ matrix.os }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_BUNDLES: ${{ matrix.bundles }}
+        with:
+          args: --bundles ${{ matrix.bundles }}
+          tagName: v__VERSION__
+          releaseName: '工具箱 v__VERSION__'
+          releaseBody: |
+            三平台打包产物（Windows .exe / macOS .dmg / Linux .deb、.AppImage）。
+          releaseDraft: false
+          prerelease: false
