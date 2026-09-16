@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "默认能力：允许核心能力与对话框（保存文件）。",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}
