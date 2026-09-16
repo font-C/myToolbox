@@ -43,7 +43,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 只需 NSIS 安装包；跳过 MSI/WiX，避免 WiX 工具链在 runner 上不稳定
+          TAURI_BUNDLES: nsis
         with:
+          args: --bundles nsis
           tagName: v__VERSION__
           releaseName: '工具箱 v__VERSION__'
           releaseBody: 'Windows 版打包产物见附件（.exe / NSIS 安装包）。'
