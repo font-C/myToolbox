@@ -63,6 +63,20 @@ jobs:
           restore-keys: |
             ${{ matrix.os }}-tauri-
 
+      - name: (Windows) Download pdfium.dll
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # pdfium-render 运行时需要外部 pdfium 动态库；从 bblanchon/pdfium-binaries
+          # 最新 release 下载 win-x64 版本，解压并放到 src-tauri/（tauri 会打进资源目录）
+          VERSION=$(curl -s https://api.github.com/repos/bblanchon/pdfium-binaries/releases/latest \
+            | grep -o '"tag_name": *"[^"]*"' | sed 's/.*"\(.*\)"/\1/')
+          echo "pdfium version: ${VERSION}"
+          curl -sL -o pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/${VERSION}/pdfium-win-x64.tgz"
+          tar -xzf pdfium.tgz
+          cp bin/pdfium.dll src-tauri/pdfium.dll
+          ls -la src-tauri/pdfium.dll
+
       - name: Build & bundle ${{ matrix.os }}
         uses: tauri-apps/tauri-action@v0
         env:

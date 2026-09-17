@@ -25,6 +25,15 @@ objc2-core-foundation = "=0.3.2"
 objc2-app-kit = "=0.3.2"
 objc2-pdf-kit = "=0.3.2"
 
+# Windows：用 pdfium 把裁剪后的 PDF 逐页渲染成位图，再用 GDI 打印到默认打印机
+[target.'cfg(target_os = "windows")'.dependencies]
+pdfium-render = { version = "=0.8.37" }
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Printing",
+] }
+
 [profile.release]
 codegen-units = 1
 lto = true
