@@ -179,8 +179,9 @@ function showPrintLayer(images) {
 }
 
 /**
- * 直接打印裁剪后的 PDF（不下载本地）。
- * - Tauri：用 pdf-lib 生成裁剪后的 PDF 字节，交给原生 AppKit 打印（矢量、同步、无窗口）；
+ * 直接打印裁剪后的 PDF（不下载本地、不保存成文件）。
+ * - Tauri：用 pdf-lib 生成裁剪后的 PDF 字节，交给原生打印——
+ *   macOS 走 PDFKit（矢量、同步、无窗口），Windows 走 pdfium 渲染 + GDI（同样直接打到默认打印机）；
  * - 浏览器：用 pdf.js 把每页裁剪区渲染成图片，在主窗口注入打印层后用 window.print()。
  */
 export async function printCroppedPdf(rawBuffer, cropBoxes, pageInfos) {
