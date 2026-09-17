@@ -32,6 +32,7 @@ windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_Graphics_Printing",
+  "Win32_Storage_Xps",
 ] }
 
 [profile.release]

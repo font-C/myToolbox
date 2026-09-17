@@ -102,17 +102,18 @@ fn print_pdf(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn print_pdf(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
+    use tauri::Manager; // 用于 app.path() 定位打包后的 pdfium 资源目录
     use pdfium_render::prelude::*;
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use windows_sys::core::{PCWSTR, PWSTR};
+    // 注意：windows-sys 中 PCWSTR/PWSTR 是裸指针类型别名（*const/*mut u16），
+    // 不是元组结构体，统一用 std::ptr::null()/as_ptr() 构造。
     use windows_sys::Win32::Graphics::Gdi::{
         CreateDCW, DeleteDC, GetDeviceCaps, StretchDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
-        DIB_RGB_COLORS, HORZRES, HORZSIZE, SRCCOPY, VERTRES, VERTSIZE,
+        DIB_RGB_COLORS, HORZRES, HORZSIZE, RGBQUAD, SRCCOPY, VERTRES, VERTSIZE,
     };
-    use windows_sys::Win32::Graphics::Printing::{
-        EndDoc, EndPage, GetDefaultPrinterW, StartDocW, StartPage, DOCINFOW,
-    };
+    use windows_sys::Win32::Graphics::Printing::GetDefaultPrinterW;
+    use windows_sys::Win32::Storage::Xps::{EndDoc, EndPage, StartDocW, StartPage, DOCINFOW};
 
     /// 从多个候选位置查找 pdfium 动态库，返回其完整路径。
     /// 优先级：Tauri 资源目录（打包后 pdfium.dll 位于此）→ 可执行文件所在目录 →
@@ -183,7 +184,7 @@ fn print_pdf(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
     let printer_name = unsafe {
         // 先查询需要的缓冲区大小
         let mut size: u32 = 0;
-        let _ = GetDefaultPrinterW(PWSTR::null(), &mut size);
+        let _ = GetDefaultPrinterW(std::ptr::null_mut(), &mut size);
         let mut buf: Vec<u16> = vec![0u16; size as usize];
         let ok = GetDefaultPrinterW(buf.as_mut_ptr(), &mut size);
         if ok == 0 {
@@ -203,17 +204,17 @@ fn print_pdf(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
     printer_wide.push(0);
 
     let hdc = unsafe {
-        CreateDCW(PCWSTR::null(), PCWSTR(printer_wide.as_ptr()), PCWSTR::null(), std::ptr::null())
+        CreateDCW(std::ptr::null(), printer_wide.as_ptr(), std::ptr::null(), std::ptr::null())
     };
-    if hdc == 0 {
+    if hdc == std::ptr::null_mut() {
         return Err("创建打印机设备上下文失败".to_string());
     }
 
     // 4) 获取物理页在设备坐标下的可打印区域（像素）与纸张物理尺寸（毫米）
-    let print_w = unsafe { GetDeviceCaps(hdc, HORZRES) };
-    let print_h = unsafe { GetDeviceCaps(hdc, VERTRES) };
-    let paper_w_mm = unsafe { GetDeviceCaps(hdc, HORZSIZE) };
-    let paper_h_mm = unsafe { GetDeviceCaps(hdc, VERTSIZE) };
+    let print_w = unsafe { GetDeviceCaps(hdc, HORZRES as i32) };
+    let print_h = unsafe { GetDeviceCaps(hdc, VERTRES as i32) };
+    let paper_w_mm = unsafe { GetDeviceCaps(hdc, HORZSIZE as i32) };
+    let paper_h_mm = unsafe { GetDeviceCaps(hdc, VERTSIZE as i32) };
     if print_w <= 0 || print_h <= 0 {
         let _ = unsafe { DeleteDC(hdc) };
         return Err("无法获取打印机可打印区域".to_string());
@@ -225,10 +226,10 @@ fn print_pdf(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
     // 5) 创建 DOCINFO，开始文档
     let doc_name_wide: Vec<u16> = "工具箱打印".encode_utf16().chain(std::iter::once(0)).collect();
     let di = DOCINFOW {
-        cbSize: std::mem::size_of::<DOCINFOW>() as u32,
-        lpszDocName: PCWSTR(doc_name_wide.as_ptr()),
-        lpszOutput: PCWSTR::null(),
-        lpszDatatype: PCWSTR::null(),
+        cbSize: std::mem::size_of::<DOCINFOW>() as i32,
+        lpszDocName: doc_name_wide.as_ptr(),
+        lpszOutput: std::ptr::null(),
+        lpszDatatype: std::ptr::null(),
         fwType: 0,
     };
     if unsafe { StartDocW(hdc, &di) } <= 0 {
@@ -252,8 +253,8 @@ fn print_pdf(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
 
         // 渲染到位图：按照打印 DPI 渲染，保证清晰度（至少 ~2x 屏幕清晰度）
         let render_scale = (dpi_x / 72.0).max(dpi_y / 72.0).max(2.0);
-        let bmp_w = (page_w_pt * render_scale).round().max(1.0);
-        let bmp_h = (page_h_pt * render_scale).round().max(1.0);
+        let bmp_w = (page_w_pt as f64 * render_scale).round().max(1.0);
+        let bmp_h = (page_h_pt as f64 * render_scale).round().max(1.0);
         let config = PdfRenderConfig::new()
             .set_target_width(bmp_w as i32)
             .set_maximum_height(bmp_h as i32)
@@ -292,9 +293,17 @@ fn print_pdf(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
                 biBitCount: 32,
                 biCompression: BI_RGB,
                 biSizeImage: (img_w * img_h * 4) as u32,
-                ..Default::default()
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
             },
-            bmiColors: [Default::default(); 1],
+            bmiColors: [RGBQUAD {
+                rgbBlue: 0,
+                rgbGreen: 0,
+                rgbRed: 0,
+                rgbReserved: 0,
+            }],
         };
         let res = unsafe {
             StretchDIBits(
@@ -313,7 +322,7 @@ fn print_pdf(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
                 SRCCOPY,
             )
         };
-        if res == 0 || res == usize::MAX {
+        if res == -1 {
             let _ = unsafe { EndDoc(hdc) };
             let _ = unsafe { DeleteDC(hdc) };
             return Err(format!("绘制第 {} 页失败", index + 1));
