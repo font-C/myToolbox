@@ -269,12 +269,19 @@ export function generateExpression(options) {
   return null
 }
 
-/** 批量生成，返回 null-safe 的题目数组（跳过失败项） */
+/**
+ * 批量生成题目。
+ * 持续生成直到凑满 count 道题；仅当多次尝试后 0 道也无法生成（配置在数学上无解）时才返回不足量，避免死循环。
+ */
 export function generatePapers(options, count) {
   const papers = []
-  for (let i = 0; i < count; i++) {
+  // 防死循环兜底：给足尝试空间（正常情况远用不完）
+  const guard = count * 500 + 5000
+  let attempts = 0
+  while (papers.length < count && attempts < guard) {
     const item = generateExpression(options)
     if (item) papers.push(item)
+    attempts++
   }
   return papers
 }
