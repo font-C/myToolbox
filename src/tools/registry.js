@@ -15,6 +15,7 @@ import { defineAsyncComponent } from 'vue'
 /** 懒加载异步组件，供 <component :is> 使用 */
 const lazyCropTool = defineAsyncComponent(() => import('../views/CropTool.vue'))
 const lazyMentalMath = defineAsyncComponent(() => import('../views/MentalMath.vue'))
+const lazyComposeTool = defineAsyncComponent(() => import('../views/PdfCompose.vue'))
 
 export const tools = [
   {
@@ -30,6 +31,13 @@ export const tools = [
     desc: '加减乘除口算，支持混合运算',
     icon: '🧮',
     component: lazyMentalMath,
+  },
+  {
+    id: 'pdf-compose',
+    name: 'PDF 拼接',
+    desc: '多图片/多PDF自由拼版，支持标注与打印',
+    icon: '🧩',
+    component: lazyComposeTool,
   },
 ]
 

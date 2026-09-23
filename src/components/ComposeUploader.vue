@@ -1,9 +1,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { ACCEPTED_EXTENSION } from '../constants/pdf'
+import { COMPOSE_ACCEPT } from '../constants/pdf'
 import { useNativeFileDrop } from '../composables/useNativeFileDrop'
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['files'])
 const dragging = ref(false)
 const inputEl = ref(null)
 
@@ -20,17 +20,15 @@ onMounted(() => {
 onUnmounted(() => unlistenNativeDrop())
 
 function isValid(file) {
-  return file && file.name.toLowerCase().endsWith(ACCEPTED_EXTENSION)
+  return file && /\.(png|jpe?g|pdf)$/i.test(file.name || '')
 }
 
+// 收集有效文件（图片/PDF 混合，可能多个），交给父组件 store.importFiles
 function handleFiles(list) {
-  const file = list?.[0]
-  if (!file) return
-  if (!isValid(file)) {
-    emit('invalid')
-    return
-  }
-  emit('select', file)
+  const files = Array.from(list || [])
+  const valid = files.filter(isValid)
+  if (valid.length === 0) return
+  emit('files', valid)
 }
 
 function onDrop(e) {
@@ -49,15 +47,15 @@ function onWindowDragOver(e) {
   dragging.value = true
   e.preventDefault()
 }
-function onWindowDragLeave(e) {
+function onWindowDragLeave() {
   dragging.value = false
 }
 </script>
 
 <template>
   <div
-    class="uploader"
-    :class="{ 'uploader--drag': dragging }"
+    class="c-uploader"
+    :class="{ 'c-uploader--drag': dragging }"
     @dragover.prevent="onWindowDragOver"
     @dragleave="onWindowDragLeave"
     @drop="onDrop"
@@ -66,19 +64,20 @@ function onWindowDragLeave(e) {
     <input
       ref="inputEl"
       type="file"
-      accept=".pdf"
-      class="uploader__input"
+      :accept="COMPOSE_ACCEPT"
+      multiple
+      class="c-uploader__input"
       @change="onInputChange"
     />
-    <div class="uploader__icon">📄</div>
-    <p class="uploader__title">拖拽 PDF 到此处，或点击选择文件</p>
-    <p class="uploader__hint">支持多页 PDF · 纯本地处理，文件不会上传</p>
-    <button type="button" class="btn btn--primary uploader__btn">选择 PDF 文件</button>
+    <div class="c-uploader__icon">🧩</div>
+    <p class="c-uploader__title">拖拽图片 / PDF 到此处，或点击选择文件</p>
+    <p class="c-uploader__hint">支持一次选择多个文件（PNG/JPG 与 PDF 混选）· 按页拼版</p>
+    <button type="button" class="btn btn--primary c-uploader__btn">选择文件</button>
   </div>
 </template>
 
 <style scoped>
-.uploader {
+.c-uploader {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -94,29 +93,29 @@ function onWindowDragLeave(e) {
   padding: 40px 24px;
 }
 
-.uploader:hover,
-.uploader--drag {
+.c-uploader:hover,
+.c-uploader--drag {
   border-color: var(--c-primary);
   background: rgba(59, 130, 246, 0.05);
 }
 
-.uploader__input {
+.c-uploader__input {
   display: none;
 }
 
-.uploader__icon {
+.c-uploader__icon {
   font-size: 52px;
   line-height: 1;
   margin-bottom: 16px;
 }
 
-.uploader__title {
+.c-uploader__title {
   margin: 0 0 6px;
   font-size: 17px;
   font-weight: 600;
 }
 
-.uploader__hint {
+.c-uploader__hint {
   margin: 0 0 20px;
   font-size: 13px;
   color: var(--c-text-muted);

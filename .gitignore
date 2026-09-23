@@ -18,3 +18,4 @@ npm-debug.log*
 # 缓存与临时目录
 .npm-cache/
 .test-data/
+doc/

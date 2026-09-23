@@ -1,5 +1,13 @@
-use std::fs::File;
+use std::fs::{File, read};
 use std::io::Write;
+
+/// 读取本地文件内容为字节（供原生拖拽导入 PDF/图片使用）。
+/// WKWebView 的原生拖拽事件只提供文件路径，webview 无法直接读文件，
+/// 故在此返回完整字节，前端再还原为 Blob/File 走既有导入管线。
+#[tauri::command]
+fn read_path(path: String) -> Result<Vec<u8>, String> {
+    read(&path).map_err(|e| format!("读取文件失败: {e}"))
+}
 
 /// 将裁剪导出的 PDF 字节写入用户选择的本地路径。
 #[tauri::command]
@@ -356,7 +364,7 @@ fn print_pdf(_app: tauri::AppHandle, _bytes: Vec<u8>) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![save_bytes, print_pdf])
+        .invoke_handler(tauri::generate_handler![read_path, save_bytes, print_pdf])
         .run(tauri::generate_context!())
         .expect("运行 tauri 应用时发生错误");
 }

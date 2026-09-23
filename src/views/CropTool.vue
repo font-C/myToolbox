@@ -76,11 +76,7 @@ async function handlePrint() {
 
 <template>
   <div class="crop">
-    <header class="crop__header">
-      <div class="crop__brand">
-        <span class="crop__logo">✂️</span>
-        <h1 class="crop__title">PDF 裁剪工具</h1>
-      </div>
+    <header class="crop__header crop__header--bars">
       <div class="crop__header-actions">
         <span v-if="loaded" class="crop__filename">{{ store.fileName }}</span>
         <button v-if="loaded" type="button" class="btn" @click="openFilePicker">打开其他文件</button>
@@ -148,25 +144,11 @@ async function handlePrint() {
 .crop__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 14px 24px;
+  padding: 8px 24px;
   background: var(--c-surface);
   border-bottom: 1px solid var(--c-border);
   flex-wrap: wrap;
-}
-
-.crop__brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.crop__logo {
-  font-size: 22px;
-}
-.crop__title {
-  margin: 0;
-  font-size: 18px;
 }
 
 .crop__header-actions {
@@ -174,6 +156,7 @@ async function handlePrint() {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 .crop__filename {
   font-size: 13px;
