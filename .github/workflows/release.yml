@@ -57,13 +57,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # 目前只在 arm64 (Apple Silicon) 上稳定构建 dmg；x64 (macos-14) 因 bundle_dmg.sh 偶发失败暂禁用
         include:
-          - os: macos-latest     # Apple Silicon (arm64)
+          - os: macos-latest     # Apple Silicon (arm64) — 官方推荐 runner
             arch: arm64
             target: aarch64-apple-darwin
-          - os: macos-14         # Intel (x64) — macos-14 是最后一个 Intel runner
-            arch: x64
-            target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
