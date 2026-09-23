@@ -126,21 +126,24 @@ jobs:
         shell: bash
         run: |
           cd src-tauri/target/release/bundle
-          # 把所有 bundle 产物收集到 dist/
           mkdir -p dist
-          find dmg app macos msi nsis deb appimage rpm -maxdepth 2 -type f \
-            \( -name "*.dmg" -o -name "*.tar.gz" -o -name "*.nsis" -o -name "*.exe" \
-               -o -name "*.msi" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \) \
-            -exec cp {} dist/ \; 2>/dev/null || true
+          # macOS: dmg 目录 + macos 目录(.app)
+          [ -d dmg ]  && cp -r dmg/*.dmg dist/ 2>/dev/null || true
+          [ -d macos ] && for d in macos/*.app; do
+              tar -czf "dist/$(basename "${d}").tar.gz" -C macos "$(basename "${d}")" 2>/dev/null || true
+            done
+          # Windows: nsis (.exe) + msi (.msi)
+          [ -d nsis ] && cp -r nsis/*.exe dist/ 2>/dev/null || true
+          [ -d msi ]  && cp -r msi/*.msi dist/ 2>/dev/null || true
+          # Linux: deb + appimage + rpm
+          [ -d deb ]  && cp -r deb/*.deb dist/ 2>/dev/null || true
+          [ -d appimage ] && cp -r appimage/*.AppImage dist/ 2>/dev/null || true
+          [ -d rpm ]  && cp -r rpm/*.rpm dist/ 2>/dev/null || true
           ls -lh dist/
-          # 用 runner-os + 产物名命名 artifact
-          ARTIFACT="tauri-${{ matrix.os }}-${{ matrix.rust_targets }}"
-          echo "uploading as: ${ARTIFACT}"
-          echo "artifact_name=${ARTIFACT}" >> "$GITHUB_OUTPUT"
         id: collect
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.collect.outputs.artifact_name }}
+          name: tauri-${{ matrix.os }}-${{ matrix.rust_targets }}
           path: src-tauri/target/release/bundle/dist/
           if-no-files-found: error
 
