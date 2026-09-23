@@ -115,15 +115,34 @@ jobs:
           cp bin/pdfium.dll src-tauri/pdfium.dll
           ls -la src-tauri/pdfium.dll
 
-      # 构建 + 只上传 artifacts（不创建 Release，后面统一处理）
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build & bundle
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_BUNDLES: ${{ matrix.bundles }}
+        run: |
+          cd src-tauri
+          npm run tauri build
+
+      - name: Collect & upload artifacts
+        shell: bash
+        run: |
+          cd src-tauri/target/release/bundle
+          # 把所有 bundle 产物收集到 dist/
+          mkdir -p dist
+          find dmg app macos msi nsis deb appimage rpm -maxdepth 2 -type f \
+            \( -name "*.dmg" -o -name "*.tar.gz" -o -name "*.nsis" -o -name "*.exe" \
+               -o -name "*.msi" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \) \
+            -exec cp {} dist/ \; 2>/dev/null || true
+          ls -lh dist/
+          # 用 runner-os + 产物名命名 artifact
+          ARTIFACT="tauri-${{ matrix.os }}-${{ matrix.rust_targets }}"
+          echo "uploading as: ${ARTIFACT}"
+          echo "artifact_name=${ARTIFACT}" >> "$GITHUB_OUTPUT"
+        id: collect
+      - uses: actions/upload-artifact@v4
         with:
-          args: --bundles ${{ matrix.bundles }}
-          createRelease: false
-          uploadArtifacts: true
+          name: ${{ steps.collect.outputs.artifact_name }}
+          path: src-tauri/target/release/bundle/dist/
+          if-no-files-found: error
 
   # —— 发布 ——
   release:
