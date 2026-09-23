@@ -105,15 +105,15 @@ jobs:
 
       - name: (Windows) Download pdfium.dll
         if: runner.os == 'Windows'
-        shell: bash
+        shell: pwsh
         run: |
-          VERSION=$(curl -s https://api.github.com/repos/bblanchon/pdfium-binaries/releases/latest \
-            | grep -o '"tag_name": *"[^"]*"' | sed 's/.*"\(.*\)"/\1/')
-          echo "pdfium version: ${VERSION}"
-          curl -sL -o pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/${VERSION}/pdfium-win-x64.tgz"
+          $ver = (Invoke-RestMethod -Uri "https://api.github.com/repos/bblanchon/pdfium-binaries/releases/latest").tag_name
+          Write-Host "pdfium version: $ver"
+          Invoke-WebRequest -Uri "https://github.com/bblanchon/pdfium-binaries/releases/download/$ver/pdfium-win-x64.tgz" -OutFile pdfium.tgz
           tar -xzf pdfium.tgz
-          cp bin/pdfium.dll src-tauri/pdfium.dll
-          ls -la src-tauri/pdfium.dll
+          New-Item -ItemType Directory -Force -Path src-tauri | Out-Null
+          Copy-Item bin/pdfium.dll src-tauri/pdfium.dll
+          Get-Item src-tauri/pdfium.dll | Select-Object Name,Length
 
       - name: Build & bundle
         env:
@@ -148,9 +148,11 @@ jobs:
           if-no-files-found: error
 
   # —— 发布 ——
+  # 即使某平台构建失败也尝试发布 (只上传成功构建的 artifacts)
   release:
     needs: [decide, build]
     runs-on: ubuntu-latest
+    if: always() && needs.decide.result == 'success'
     permissions:
       contents: write
     env:
@@ -168,6 +170,9 @@ jobs:
           merge-multiple: true
 
       - run: ls -lh dist/
+      - name: Skip if no artifacts
+        if: hashFiles('dist/*') == ''
+        run: echo "⚠️  没有可发布的产物，跳过"; exit 0
 
       # ---- 模式 1：版本化 Release (vX.Y.Z) ----
       - name: Release (version tag)
