@@ -1,0 +1,227 @@
+name: Build & Release
+
+# —— 触发条件 ——
+# 1) push 版本 tag (v0.2.0 等) → 创建对应版本的 Release (GitHub 自动按 semver 标为 Latest)
+# 2) push main/master       → 更新"latest" Release (覆盖旧 assets，上一版仍保留在其 vX.Y.Z Release)
+# 3) 手动触发
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 发布模式
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto     # 根据触发来源自动判断 (tag→version，branch→latest)
+          - version  # 强制创建带版本号的 Release (需先打 vX.Y.Z tag)
+          - latest   # 强制更新 latest Release
+
+jobs:
+  # —— 判断本次应该打 version 还是 latest ——
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      kind: ${{ steps.kind.outputs.kind }}
+    steps:
+      - id: kind
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            case "${{ inputs.mode }}" in
+              version) echo "kind=version" >> "$GITHUB_OUTPUT" ;;
+              latest)  echo "kind=latest"  >> "$GITHUB_OUTPUT" ;;
+              *)
+                # auto: 若当前 HEAD 上已有 v* tag 则走 version，否则 latest
+                if git ls-remote --tags origin "refs/tags/v*" | grep -q "\srefs/tags/v"; then
+                  echo "kind=version" >> "$GITHUB_OUTPUT"
+                else
+                  echo "kind=latest"  >> "$GITHUB_OUTPUT"
+                fi
+                ;;
+            esac
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "kind=version" >> "$GITHUB_OUTPUT"
+          else
+            echo "kind=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+  # —— 构建（macOS x64 + arm64 并行）——
+  build:
+    needs: decide
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest     # Apple Silicon (arm64)
+            arch: arm64
+            target: aarch64-apple-darwin
+          - os: macos-14         # Intel (x64) — macos-14 是最后一个 Intel runner
+            arch: x64
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 拿到版本号 (tag 或 package.json)
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=${V}"          >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      # Rust + Tauri
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # Node.js
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      # 如果没配 Apple 签名证书，跳过签名（unsigned dmg 在本地也能打开，首次运行去设置里允许）
+      - name: Build app & dmg (unsigned)
+        env:
+          # 强制无签名，避免 CI 无证书时报错
+          TAURI_SIGNING_PRIVATE_KEY: ""
+        run: |
+          cd src-tauri
+          npm run tauri build
+
+      # 把 .app 打成 tar.gz (GitHub Release 不能直接传 .app 目录)
+      - name: Archive .app
+        run: |
+          APP=$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name "*.app" -type d | head -1)
+          [[ -z "$APP" ]] && exit 1
+          NAME="${APP%.app}.tar.gz"
+          tar -czf "$NAME" -C "$(dirname "$APP")" "$(basename "$APP")"
+          echo "APP_TGZ=$NAME" >> "$GITHUB_ENV"
+
+      - name: Collect artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          DMG=$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -name "*.dmg" | head -1)
+          [[ -z "$DMG" ]] && exit 1
+          # 统一命名：MyToolbox_{VERSION}_{ARCH}.dmg / .app.tar.gz
+          mkdir -p dist
+          cp "$DMG" "dist/MyToolbox_${VERSION}_${ARCH}.dmg"
+          cp "$APP_TGZ" "dist/MyToolbox_${VERSION}_${ARCH}.app.tar.gz"
+          ls -lh dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+
+  # —— 发布 ——
+  release:
+    needs: [decide, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - run: ls -lh dist/
+
+      # 版本化 Release：tag 用 v{VERSION} (若来自 push tag 已存在)；自动按 semver 成为 Latest
+      - name: Release (version)
+        if: needs.decide.outputs.kind == 'version'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            dist/*.dmg
+            dist/*.tar.gz
+          overwrite_files: true   # 重跑覆盖同 tag assets
+          fail_on_unmatched_files: true
+
+      # "latest" Release：固定 tag = "latest"，每次覆盖 assets，上一版本 Release 保留在其 vX.Y.Z tag 下
+      # GitHub Release 页面上，版本化 Release(v0.2.0) 自动因 semver 最大而成为 Latest；
+      # 我们自己的 "latest" tag 是个独立入口，永远指向最新构建
+      - name: Release (latest)
+        if: needs.decide.outputs.kind == 'latest'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="latest"
+          REPO="${GITHUB_REPOSITORY}"
+          API="https://api.github.com/repos/${REPO}"
+
+          echo "🎯 更新 latest Release (v${VERSION})"
+
+          # 1) 删掉旧的 tag (若存在) → 指向当前 HEAD
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            git push origin ":refs/tags/${TAG}" || true
+          fi
+          git tag -f "${TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${TAG}" --force
+
+          # 2) 找 tag="${TAG}" 对应的 Release
+          REL_JSON=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/tags/${TAG}" || true)
+          REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).id)}catch(e){}})")
+
+          if [[ -z "${REL_ID:-}" ]]; then
+            # 创建新的 latest Release
+            REL_JSON=$(curl -sL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -d "{\"tag_name\":\"${TAG}\",\"name\":\"latest (v${VERSION})\",\"body\":\"自动更新的滚动构建。当前版本 **v${VERSION}**。\",\"draft\":false,\"prerelease\":true}" \
+              "${API}/releases")
+            REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")
+            echo "created latest Release id=${REL_ID}"
+          else
+            echo "found latest Release id=${REL_ID}"
+          fi
+
+          # 3) 删除该 Release 所有旧 assets (实现"原来的改为对应版本"——旧资产清理掉，版本化 Release 不受影响)
+          ASSETS=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/${REL_ID}" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>JSON.parse(s).assets.forEach(a=>console.log(a.id)))" || true)
+          for A in ${ASSETS}; do
+            echo "  删除旧 asset id=${A}"
+            curl -sL -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/assets/${A}" >/dev/null
+          done
+
+          # 4) 上传新 assets
+          for F in dist/*; do
+            echo "⬆️  上传 $(basename "$F")"
+            curl -sL -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@${F}" \
+              "${API}/releases/${REL_ID}/assets?name=$(basename "${F}")" >/dev/null
+          done
+
+          echo "✅ latest Release 已更新 → https://github.com/${REPO}/releases/tag/${TAG}"
