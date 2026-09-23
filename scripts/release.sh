@@ -32,9 +32,18 @@ if [[ "$PKG_VER" != "$CONF_VER" || "$PKG_VER" != "$VERSION" ]]; then
   exit 1
 fi
 
-# 3. 构建
-echo "🔨 npm run tauri build ..."
-npm run tauri build
+SKIP_BUILD=0
+if [[ "${1:-}" == "--skip-build" ]]; then
+  SKIP_BUILD=1
+fi
+
+# 3. 构建（可 --skip-build）
+if [[ $SKIP_BUILD -eq 0 ]]; then
+  echo "🔨 npm run tauri build ..."
+  npm run tauri build
+else
+  echo "⏭  跳过构建（使用已有产物）"
+fi
 
 # 4. 定位构建产物
 BUNDLE="src-tauri/target/release/bundle"
