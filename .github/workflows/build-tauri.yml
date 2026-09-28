@@ -1,10 +1,10 @@
 name: build-tauri
 
+# 仅保留手动构建（验证性打包）。版本发布统一走 release.yml（decide→build→release），
+# 避免两套工作流在 v* tag 上竞态：tauri-action 产出草稿 Release、且与 release.yml
+# 的 tag 重建互相踩踏，曾导致已发布的 Release 被打回草稿。
 on:
   workflow_dispatch: # 手动触发
-  push:
-    tags:
-      - 'v*' # 推送 v0.1.0 之类标签时自动打包
 
 jobs:
   build:

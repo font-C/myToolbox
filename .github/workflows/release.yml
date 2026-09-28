@@ -151,8 +151,11 @@ jobs:
   # 即使某平台构建失败也尝试发布 (只上传成功构建的 artifacts)
   release:
     needs: [decide, build]
-    runs-on: ubuntu-latest
     if: always() && needs.decide.result == 'success'
+    outputs:
+      tag: ${{ steps.verrel.outputs.tag }}
+      body: ${{ steps.verrel.outputs.body }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
@@ -176,6 +179,7 @@ jobs:
 
       # ---- 模式 1：版本化 Release (vX.Y.Z) ----
       - name: Release (version tag)
+        id: verrel
         if: needs.decide.outputs.kind == 'version'
         run: |
           set -euo pipefail
@@ -185,39 +189,54 @@ jobs:
 
           echo "🚀 创建/更新 version Release ${TAG}"
 
-          # 1) tag 必须指向当前 HEAD
-          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+          # 1) tag 指向当前 HEAD；已一致则不动——删除/重建 tag 会把已发布的 Release 打回草稿
+          if [ "$(git rev-parse "refs/tags/${TAG}"^{commit} 2>/dev/null || true)" != "${GITHUB_SHA}" ]; then
             git push origin ":refs/tags/${TAG}" || true
+            git tag -f "${TAG}" "${GITHUB_SHA}"
+            git push origin "refs/tags/${TAG}" --force
           fi
-          git tag -f "${TAG}" "${GITHUB_SHA}"
-          git push origin "refs/tags/${TAG}" --force
 
-          # 2) 查/建 Release
+          # 2) 更新说明：上一版本 tag → 本 tag 的提交列表（简要描述）
+          PREV_TAG=$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "${TAG}" | head -1 || true)
+          CHANGELOG=""
+          if [ -n "${PREV_TAG:-}" ]; then
+            CHANGELOG=$(git log --no-merges --format='- %s (%h)' "${PREV_TAG}..${TAG}" | head -30)
+          fi
+          BODY="## 更新内容（${PREV_TAG:-} → ${TAG}）
+
+${CHANGELOG:-详见提交历史}
+
+---
+下载：Windows（exe 安装包）· macOS（dmg）· Linux（deb / AppImage）。全程本地处理，不上传数据。
+插件商店：主源 GitHub Pages，镜像 Gitee raw（应用内商店页一键切换）。"
+          echo "${BODY}"
+
+          # 3) 查/建 Release（说明同步写入）
+          jq -n --arg tag "${TAG}" --arg body "${BODY}" \
+            '{tag_name:$tag, name:("工具箱 "+$tag), body:$body, draft:false, prerelease:false}' > /tmp/payload.json
           REL_JSON=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/tags/${TAG}" || true)
           REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).id)}catch(e){}})")
 
           if [[ -z "${REL_ID:-}" ]]; then
             REL_JSON=$(curl -sL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
-              -d "{
-                \"tag_name\":\"${TAG}\",
-                \"name\":\"工具箱 ${TAG}\",
-                \"body\":\"版本 **${TAG}**。产物含 macOS dmg、Windows nsis、Linux deb+AppImage。\",
-                \"draft\":false,\"prerelease\":false
-              }" "${API}/releases")
+              -d @/tmp/payload.json "${API}/releases")
             REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")
             echo "创建 ${TAG} Release id=${REL_ID}"
           else
             echo "复用 ${TAG} Release id=${REL_ID}"
+            curl -sL -X PATCH -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -d @/tmp/payload.json "${API}/releases/${REL_ID}" >/dev/null
           fi
 
-          # 3) 清旧 assets
+          # 4) 清旧 assets
           for A in $(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/${REL_ID}" \
             | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>JSON.parse(s).assets.forEach(a=>console.log(a.id)))"); do
             curl -sL -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/assets/${A}" >/dev/null
           done
 
-          # 4) 上传
+          # 5) 上传
           for F in dist/*; do
             echo "⬆️  $(basename "$F")"
             curl -sL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
@@ -226,6 +245,14 @@ jobs:
               "${API}/releases/${REL_ID}/assets?name=$(basename "${F}")" >/dev/null
           done
           echo "✅ https://github.com/${REPO}/releases/tag/${TAG}"
+
+          # 6) 传给 gitee-release job
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<RELEASE_BODY_EOF"
+            echo "${BODY}"
+            echo "RELEASE_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       # ---- 模式 2：latest Release (tag=latest，覆盖更新) ----
       - name: Release (latest)
@@ -283,3 +310,80 @@ jobs:
               "${API}/releases/${REL_ID}/assets?name=$(basename "${F}")" >/dev/null
           done
           echo "✅ https://github.com/${REPO}/releases/tag/${TAG}"
+
+  # —— 同步版本化 Release 到 Gitee（代码镜像仓库的 Gitee Release 附安装包）——
+  gitee-release:
+    needs: [decide, release]
+    if: >-
+      always() &&
+      needs.decide.outputs.kind == 'version' &&
+      needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      GITEE_REPO: ${{ secrets.GITEE_REPO }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Sync release to Gitee
+        run: |
+          set -euo pipefail
+          if [ -z "${GITEE_TOKEN:-}" ] || [ -z "${GITEE_REPO:-}" ]; then
+            echo "跳过：未配置 GITEE_TOKEN / GITEE_REPO secrets"
+            exit 0
+          fi
+          VERSION="${{ needs.decide.outputs.version }}"
+          TAG="v${VERSION}"
+          OWNER="${GITEE_REPO%%/*}"
+          GREPO="${OWNER}/my-toolbox"   # 安装包发布在代码镜像仓库的 Gitee Release
+          GAPI="https://gitee.com/api/v5/repos/${GREPO}"
+
+          # 更新说明：上一版本 tag → 本 tag（与 GitHub Release 一致）
+          PREV_TAG=$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "${TAG}" | head -1 || true)
+          CHANGELOG=""
+          if [ -n "${PREV_TAG:-}" ]; then
+            CHANGELOG=$(git log --no-merges --format='- %s (%h)' "${PREV_TAG}..${TAG}" | head -30)
+          fi
+          BODY="## 更新内容（${PREV_TAG:-} → ${TAG}）
+
+${CHANGELOG:-详见提交历史}
+
+---
+下载：Windows（exe 安装包）· macOS（dmg）· Linux（deb / AppImage）。全程本地处理，不上传数据。"
+
+          # tag 同步到 Gitee（Gitee Release 依附于 tag）
+          git push "https://${OWNER}:${GITEE_TOKEN}@gitee.com/${GREPO}.git" "refs/tags/${TAG}" --force 2>/dev/null || true
+
+          # 已有同名 Release → 删除重建（附件随之重传）
+          OLD_ID=$(curl -s -H "Authorization: Bearer ${GITEE_TOKEN}" "${GAPI}/releases/tags/${TAG}" \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).id)}catch(e){}})")
+          if [ -n "${OLD_ID:-}" ]; then
+            echo "删除旧 Gitee Release id=${OLD_ID}"
+            curl -s -X DELETE -H "Authorization: Bearer ${GITEE_TOKEN}" "${GAPI}/releases/${OLD_ID}" >/dev/null || true
+            sleep 2
+          fi
+
+          # 创建 Release（Gitee 要求 target_commitish）
+          jq -n --arg tag "${TAG}" --arg body "${BODY}" \
+            '{tag_name:$tag, name:("工具箱 "+$tag), body:$body, target_commitish:"master", prerelease:false}' > /tmp/gitee-payload.json
+          REL_ID=$(curl -s -X POST -H "Authorization: Bearer ${GITEE_TOKEN}" \
+            -H "Content-Type: application/json" -d @/tmp/gitee-payload.json \
+            "${GAPI}/releases" \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).id)}catch(e){}})")
+          [ -n "${REL_ID:-}" ] || { echo "❌ Gitee Release 创建失败"; exit 1; }
+          echo "Gitee Release id=${REL_ID}"
+
+          # 上传安装包附件
+          for F in dist/*; do
+            echo "⬆️  $(basename "$F")"
+            curl -s -X POST -H "Authorization: Bearer ${GITEE_TOKEN}" \
+              -F "file=@${F}" "${GAPI}/releases/${REL_ID}/attach_files" >/dev/null
+          done
+          echo "✅ https://gitee.com/${GREPO}/releases/tag/${TAG}"
