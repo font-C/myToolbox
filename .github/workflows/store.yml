@@ -17,6 +17,8 @@ on:
       - 'plugins/**'
       - 'packages/plugin-sdk/**'
       - 'scripts/build-store.mjs'
+      - 'scripts/build-plugin.mjs'
+      - 'scripts/fetch-store-baseline.mjs'
       - '.github/workflows/store.yml'
 
 permissions:
@@ -42,8 +44,39 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Detect changed plugins
+        id: detect
+        run: |
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          IDS=""
+          # 仅在能取到推送前后两个提交时做增量判定；删除插件目录时回退全量
+          if [[ "${{ github.event_name }}" == "push" && "$BEFORE" =~ ^[0-9a-f]{40}$ ]] \
+             && git cat-file -e "$BEFORE" 2>/dev/null; then
+            DELETED=$(git diff --name-status "$BEFORE" "$AFTER" -- plugins/ | grep -c '^D' || true)
+            CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" -- plugins/ \
+              | grep -E '^plugins/[^/]+/' | cut -d/ -f2 | sort -u || true)
+            if [[ "${DELETED:-0}" == "0" && -n "$CHANGED" ]]; then
+              IDS=$(echo "$CHANGED" | tr '\n' ',' | sed 's/,$//')
+            fi
+          fi
+          echo "ids=${IDS}" >> "$GITHUB_OUTPUT"
+          echo "变更插件: ${IDS:-无（全量构建）}"
+
       - name: Build plugins (.tbox)
-        run: npm run build:plugins
+        run: |
+          IDS="${{ steps.detect.outputs.ids }}"
+          if [ -z "$IDS" ]; then
+            npm run build:plugins
+            exit 0
+          fi
+          # 增量：回填未变更插件基线（从现有商店下载），只构建变更插件；基线不可用则回退全量
+          if node scripts/fetch-store-baseline.mjs "https://font-c.github.io/myToolbox/store/" "$IDS"; then
+            npm run build:plugins -- --only="$IDS"
+          else
+            echo "↩️ 基线回填失败，回退全量构建"
+            npm run build:plugins
+          fi
 
       - name: Build store index (signed)
         env:

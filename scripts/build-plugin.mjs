@@ -10,7 +10,10 @@
  *
  * manifests.json 同时是商店索引生成（scripts/build-store-index.mjs）的输入。
  *
- * 用法：npm run build:plugins [-- --only=<id>]
+ * 用法：npm run build:plugins [-- --only=<id>[,<id>...]]
+ *
+ * --only 指定逗号分隔的插件 id 时只构建这些插件；manifests.json 采用合并策略
+ * （保留未构建插件的既有清单），供商店索引增量生成使用。
  */
 import { build } from 'vite'
 import { zipSync } from 'fflate'
@@ -24,7 +27,10 @@ const pluginsDir = path.join(root, 'plugins')
 const builtinDir = path.join(root, 'src-tauri', 'builtin')
 
 const onlyArg = process.argv.find((a) => a.startsWith('--only='))
-const only = onlyArg ? onlyArg.split('=')[1] : null
+// 逗号分隔多个插件 id；为空 = 全量构建
+const onlyIds = onlyArg
+  ? onlyArg.split('=')[1].split(',').map((s) => s.trim()).filter(Boolean)
+  : null
 
 /** 递归收集目录内文件，返回 { 相对路径(正斜杠): Uint8Array } */
 function collectFiles(dir, base = dir, acc = {}) {
@@ -46,7 +52,7 @@ async function buildOne(pluginDir) {
   if (!fs.existsSync(manifestPath)) return null
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
   const { id, version, entry = 'index.html', icon = 'icon.png' } = manifest
-  if (only && only !== id) return null
+  if (onlyIds && !onlyIds.includes(id)) return null
 
   console.log(`\n▸ 构建插件 ${id} v${version}`)
   await build({ root: pluginDir, logLevel: 'warn' })
@@ -102,5 +108,27 @@ if (built.length === 0) {
 }
 
 const manifestsPath = path.join(builtinDir, 'manifests.json')
-fs.writeFileSync(manifestsPath, JSON.stringify({ builtAt: new Date().toISOString(), plugins: built }, null, 2))
-console.log(`\n✓ 共 ${built.length} 个插件，构建清单 → ${path.relative(root, manifestsPath)}`)
+// 增量构建（--only）：与既有清单合并，未构建插件保留原条目（其 .tbox 未变，sha256 仍一致）；
+// 全量构建：整体覆盖。合并要求 builtin/ 下已有未变更插件的 .tbox 与清单。
+let finalPlugins = built
+if (onlyIds) {
+  let prevList = []
+  try {
+    const existing = JSON.parse(fs.readFileSync(manifestsPath, 'utf8'))
+    if (Array.isArray(existing.plugins)) prevList = existing.plugins
+  } catch {
+    console.error('✗ 增量构建需要既有 manifests.json（不存在或不可解析），请先全量构建一次。')
+    process.exit(1)
+  }
+  const builtIds = new Set(built.map((p) => p.id))
+  const kept = prevList.filter((p) => !builtIds.has(p.id))
+  finalPlugins = [...kept, ...built].sort((a, b) => a.id.localeCompare(b.id))
+  const missing = kept.filter((p) => !fs.existsSync(path.join(builtinDir, `${p.id}.tbox`)))
+  if (missing.length) {
+    console.error(`✗ 增量构建缺少未变更插件的 .tbox：${missing.map((p) => p.id).join(', ')}`)
+    console.error('  请先全量构建一次（npm run build:plugins）或从商店回填包文件。')
+    process.exit(1)
+  }
+}
+fs.writeFileSync(manifestsPath, JSON.stringify({ builtAt: new Date().toISOString(), plugins: finalPlugins }, null, 2))
+console.log(`\n✓ 共 ${finalPlugins.length} 个插件，构建清单 → ${path.relative(root, manifestsPath)}`)

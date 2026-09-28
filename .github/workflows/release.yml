@@ -1,16 +1,13 @@
 name: Build & Release
 
-# —— 触发条件 ——
+# —— 触发条件（发版是显式动作：打 tag 或手动运行，普通提交不打包）——
 # 1) push vX.Y.Z tag    → 创建/更新**版本化 Release** (tag=vX.Y.Z)
-# 2) push main/master   → 更新 "latest" Release (tag=latest，覆盖 assets)
-# 3) 手动 workflow_dispatch
+# 2) workflow_dispatch  → 手动确认后发布（mode=auto/version/latest）
+# 注：插件变更走 store.yml 自动重发商店，与安装包发布解耦。
 on:
   push:
     tags:
       - 'v*'
-    branches:
-      - main
-      - master
   workflow_dispatch:
     inputs:
       mode:
@@ -44,7 +41,6 @@ jobs:
             if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
               echo "kind=version" >> "$GITHUB_OUTPUT"
             elif git ls-remote --tags origin "refs/tags/v${V}" | grep -q "\srefs/tags/v${V}"; then
-              # 若当前版本已有 vX.Y.Z tag → version
               echo "kind=version" >> "$GITHUB_OUTPUT"
             else
               echo "kind=latest" >> "$GITHUB_OUTPUT"
@@ -53,25 +49,19 @@ jobs:
             echo "kind=${MODE}" >> "$GITHUB_OUTPUT"
           fi
 
-  # —— 构建（参考已验证的 build-tauri.yml 矩阵）——
+  # —— 构建（只产 macOS dmg + Windows exe 安装包）——
   build:
     needs: decide
     strategy:
       fail-fast: false
       matrix:
         include:
-          # macOS: arm64 + x64 同时编 (两个 target 同 runner)
           - os: macos-latest
-            bundles: app,dmg
+            bundles: dmg
             rust_targets: x86_64-apple-darwin,aarch64-apple-darwin
-          # Windows: nsis 即可
           - os: windows-latest
             bundles: nsis
             rust_targets: x86_64-pc-windows-msvc
-          # Linux: deb + AppImage
-          - os: ubuntu-latest
-            bundles: deb,appimage
-            rust_targets: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -127,18 +117,10 @@ jobs:
         run: |
           cd src-tauri/target/release/bundle
           mkdir -p dist
-          # macOS: dmg 目录 + macos 目录(.app)
+          # macOS: 仅 dmg 安装包
           [ -d dmg ]  && cp -r dmg/*.dmg dist/ 2>/dev/null || true
-          [ -d macos ] && for d in macos/*.app; do
-              tar -czf "dist/$(basename "${d}").tar.gz" -C macos "$(basename "${d}")" 2>/dev/null || true
-            done
-          # Windows: nsis (.exe) + msi (.msi)
+          # Windows: 仅 nsis 安装包
           [ -d nsis ] && cp -r nsis/*.exe dist/ 2>/dev/null || true
-          [ -d msi ]  && cp -r msi/*.msi dist/ 2>/dev/null || true
-          # Linux: deb + appimage + rpm
-          [ -d deb ]  && cp -r deb/*.deb dist/ 2>/dev/null || true
-          [ -d appimage ] && cp -r appimage/*.AppImage dist/ 2>/dev/null || true
-          [ -d rpm ]  && cp -r rpm/*.rpm dist/ 2>/dev/null || true
           ls -lh dist/
         id: collect
       - uses: actions/upload-artifact@v4
@@ -376,8 +358,9 @@ jobs:
           [ -n "${REL_ID:-}" ] || { echo "❌ Gitee Release 创建失败"; exit 1; }
           echo "Gitee Release id=${REL_ID}"
 
-          # 上传安装包附件
-          for F in dist/*; do
+          # 只同步 mac/windows 安装包（dmg/exe），其余文件不同步
+          for F in dist/*.dmg dist/*.exe; do
+            [ -e "$F" ] || continue
             echo "⬆️  $(basename "$F")"
             curl -s -X POST -H "Authorization: Bearer ${GITEE_TOKEN}" \
               -F "file=@${F}" "${GAPI}/releases/${REL_ID}/attach_files" >/dev/null
