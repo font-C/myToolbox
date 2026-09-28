@@ -1,7 +1,7 @@
 [package]
 name = "toolbox"
-version = "0.2.0"
-description = "本地工具箱（含 PDF 裁剪）"
+version = "0.4.0"
+description = "本地工具箱（插件化外壳 + 插件商店）"
 authors = ["you"]
 edition = "2021"
 
@@ -17,6 +17,19 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 插件内核：.tbox 解包、校验、验签
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+hex = "0.4"
+percent-encoding = "2"
+ed25519-dalek = "2"
+# PDF 处理内核（broker）：压缩（图像重编码）、加密/解锁（标准安全处理器 AES-256）
+lopdf = "0.45"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+flate2 = "1"
+rand = "0.8"
+# 系统剪贴板（broker）：剪贴板历史插件的读写通道
+arboard = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "=0.6.4"

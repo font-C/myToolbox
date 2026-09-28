@@ -1,0 +1,102 @@
+name: Build & Publish Plugin Store
+
+# 商店发布：构建全部插件 → 签名 → 生成 store/ 站点（index.json + 插件包）
+# → 发布到 GitHub Pages（主源）与 Gitee（镜像源）。
+# 契约见 specs/06-store-publish.md
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-store:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugins (.tbox)
+        run: npm run build:plugins
+
+      - name: Build store index (signed)
+        env:
+          # Ed25519 私钥 hex；公钥固定在应用内（src-tauri/src/plugin_installer.rs）
+          TOOLBOX_SIGNING_SK: ${{ secrets.ED25519_SIGNING_SK }}
+        run: node scripts/build-store.mjs
+
+      - name: Upload store artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-store
+          path: store/
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: store
+
+  deploy-pages:
+    needs: build-store
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  mirror-gitee:
+    needs: build-store
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download store artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-store
+          path: store
+
+      - name: Push to Gitee mirror
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }} # 例如 font-c/my-toolbox-store
+        run: |
+          set -e
+          if [ -z "${GITEE_TOKEN:-}" ] || [ -z "${GITEE_REPO:-}" ]; then
+            echo "跳过：未配置 GITEE_TOKEN / GITEE_REPO secrets（镜像源为可选）"
+            exit 0
+          fi
+          git config --global user.name "store-bot"
+          git config --global user.email "store-bot@users.noreply.github.com"
+          git clone --depth 1 "https://x-access-token:${GITEE_TOKEN}@gitee.com/${GITEE_REPO}.git" gitee
+          rsync -a --delete store/ gitee/ --exclude .git
+          cd gitee
+          git add -A
+          git diff --cached --quiet && echo "镜像无变化" && exit 0
+          git commit -m "store: sync from GitHub $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push origin HEAD
+          # Gitee Pages 自动刷新（若仓库开启了 Gitee Pages API 服务）；失败不阻塞
+          curl -s -X POST "https://gitee.com/api/v5/repos/${GITEE_REPO}/pages/builds" \
+            -d "access_token=${GITEE_TOKEN}" || true

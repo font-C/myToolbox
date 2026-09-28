@@ -1,0 +1,24 @@
+{
+  "formatVersion": 1,
+  "id": "text-tools",
+  "name": "文本工具",
+  "description": "字数统计、简繁转换、拼音标注、批量整理，全离线",
+  "author": "Font_C",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "minHostVersion": "0.4.0",
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": [
+    "dialog:save",
+    "fs:write",
+    "fs:read"
+  ],
+  "window": {
+    "title": "文本工具 · 工具箱",
+    "width": 980,
+    "height": 720,
+    "minWidth": 600,
+    "minHeight": 540
+  }
+}

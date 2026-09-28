@@ -1,0 +1,20 @@
+{
+  "formatVersion": 1,
+  "id": "class-tools",
+  "name": "课堂工具",
+  "description": "随机点名、课堂倒计时、随机分组——老师的一体工具",
+  "author": "Font_C",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "minHostVersion": "0.4.0",
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": [],
+  "window": {
+    "title": "课堂工具 · 工具箱",
+    "width": 960,
+    "height": 720,
+    "minWidth": 600,
+    "minHeight": 540
+  }
+}

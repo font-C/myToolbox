@@ -1,0 +1,20 @@
+{
+  "formatVersion": 1,
+  "id": "password-gen",
+  "name": "密码生成器",
+  "description": "生成高强度随机密码，可批量，强度一目了然",
+  "author": "Font_C",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "minHostVersion": "0.4.0",
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": [],
+  "window": {
+    "title": "密码生成器 · 工具箱",
+    "width": 760,
+    "height": 640,
+    "minWidth": 600,
+    "minHeight": 540
+  }
+}

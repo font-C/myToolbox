@@ -1,0 +1,24 @@
+{
+  "formatVersion": 1,
+  "id": "pdf-split",
+  "name": "PDF 拆分",
+  "description": "按页码范围把一份 PDF 拆成多份：1-8；1,2,3；1-3,8,9，支持每 N 页/逐页",
+  "author": "Font_C",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": [
+    "dialog:save",
+    "fs:write",
+    "fs:read",
+    "print"
+  ],
+  "window": {
+    "title": "PDF 拆分 · 工具箱",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 760,
+    "minHeight": 600
+  }
+}

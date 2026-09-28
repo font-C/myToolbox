@@ -1,28 +1,60 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onBeforeUnmount } from 'vue'
+import { listen } from '@tauri-apps/api/event'
 import HomePage from './views/HomePage.vue'
+import StorePage from './views/StorePage.vue'
+import ManagePage from './views/ManagePage.vue'
+import SettingsPage from './views/SettingsPage.vue'
 import { useAppStore } from './stores/app'
+import { useStore } from './composables/useStore'
 
 const appStore = useAppStore()
+const store = useStore()
 
-// activeTool 为 undefined 时显示启动台首页
-const activeTool = computed(() => appStore.activeTool)
-const isHome = computed(() => !activeTool.value)
+const tabs = [
+  { key: 'home', label: '启动台' },
+  { key: 'store', label: '商店' },
+  { key: 'manage', label: '插件管理' },
+  { key: 'settings', label: '设置' },
+]
+
+const views = { home: HomePage, store: StorePage, manage: ManagePage, settings: SettingsPage }
+const currentView = computed(() => views[appStore.view] ?? HomePage)
+
+let unlisten = null
+onMounted(async () => {
+  appStore.loadStoreConfig()
+  await appStore.init()
+  // 静默检查插件更新（供商店页与红点使用，失败不打扰）
+  store.checkUpdatesSilently()
+  // 插件变化（安装/卸载/启停/开发注册）后刷新列表
+  unlisten = await listen('toolbox://plugins-changed', () => {
+    appStore.loadPlugins().then(() => store.computeUpdates())
+  })
+})
+onBeforeUnmount(() => unlisten?.())
 </script>
 
 <template>
   <div class="app">
-    <!-- 工具内顶部返回栏 -->
-    <header v-if="!isHome" class="app__bar">
-      <button type="button" class="app__back" @click="appStore.goHome()">
-        <span class="app__back-icon">‹</span>
-        <span>返回</span>
-      </button>
-      <span class="app__bar-title">{{ activeTool.icon }} {{ activeTool.name }} · 工具箱</span>
+    <header class="app__bar">
+      <span class="app__brand">🧰 工具箱</span>
+      <nav class="app__nav">
+        <button
+          v-for="t in tabs"
+          :key="t.key"
+          type="button"
+          class="app__tab"
+          :class="{ 'app__tab--on': appStore.view === t.key }"
+          @click="appStore.setView(t.key)"
+        >
+          {{ t.label }}
+          <span v-if="t.key === 'store' && store.updates.value.length" class="app__dot"></span>
+        </button>
+      </nav>
     </header>
 
-    <!-- 首页 or 当前工具 -->
-    <component :is="isHome ? HomePage : activeTool.component" class="app__body" />
+    <component :is="currentView" class="app__body" />
   </div>
 </template>
 
@@ -36,44 +68,60 @@ const isHome = computed(() => !activeTool.value)
 .app__bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
+  gap: 20px;
+  padding: 10px 20px;
   background: var(--c-surface);
   border-bottom: 1px solid var(--c-border);
   flex: 0 0 auto;
 }
 
-.app__back {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: none;
-  background: transparent;
-  color: var(--c-primary);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 8px;
-  font-family: inherit;
-  transition: background 0.15s;
-}
-.app__back:hover {
-  background: rgba(59, 130, 246, 0.1);
-}
-.app__back-icon {
-  font-size: 20px;
-  line-height: 1;
+.app__brand {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--c-text);
 }
 
-.app__bar-title {
+.app__nav {
+  display: flex;
+  gap: 4px;
+}
+
+.app__tab {
+  border: none;
+  background: transparent;
+  color: var(--c-text-muted);
   font-size: 14px;
   font-weight: 600;
-  color: var(--c-text-muted);
+  font-family: inherit;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.app__tab:hover {
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--c-primary);
+}
+
+.app__tab--on {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--c-primary);
+}
+
+.app__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: #ef4444;
+  vertical-align: super;
 }
 
 .app__body {
   flex: 1;
-  overflow: hidden;
+  min-height: 0;
+  overflow-y: auto;
 }
 </style>

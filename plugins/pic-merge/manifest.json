@@ -1,0 +1,24 @@
+{
+  "formatVersion": 1,
+  "id": "pic-merge",
+  "name": "拼长图",
+  "description": "多张图片纵向拼接成一张长图，可设间距背景",
+  "author": "Font_C",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "minHostVersion": "0.4.0",
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": [
+    "dialog:save",
+    "fs:write",
+    "fs:read"
+  ],
+  "window": {
+    "title": "拼长图 · 工具箱",
+    "width": 940,
+    "height": 700,
+    "minWidth": 620,
+    "minHeight": 560
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "formatVersion": 1,
+  "id": "pdf-compress",
+  "name": "PDF 压缩",
+  "description": "三档压缩 PDF 体积：本地重编码内嵌图像，文字保持矢量可选中",
+  "author": "Font_C",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "minHostVersion": "0.4.0",
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": ["dialog:save", "fs:write", "fs:read", "pdf:optimize"],
+  "window": {
+    "title": "PDF 压缩 · 工具箱",
+    "width": 920,
+    "height": 700,
+    "minWidth": 640,
+    "minHeight": 560
+  }
+}

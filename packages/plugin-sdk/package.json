@@ -1,0 +1,14 @@
+{
+  "name": "@toolbox/plugin-sdk",
+  "version": "1.0.0",
+  "description": "MyToolbox 插件开发 SDK：宿主 API 封装 + 主题样式 + Vite 构建预设",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./theme.css": "./src/theme.css",
+    "./preset": "./preset.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0"
+  }
+}

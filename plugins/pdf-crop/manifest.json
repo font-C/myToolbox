@@ -1,0 +1,19 @@
+{
+  "formatVersion": 1,
+  "id": "pdf-crop",
+  "name": "PDF 裁剪",
+  "description": "框选裁剪 PDF 页面",
+  "author": "Font_C",
+  "version": "0.3.0",
+  "apiVersion": 1,
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": ["dialog:save", "fs:write", "fs:read", "print"],
+  "window": {
+    "title": "PDF 裁剪 · 工具箱",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 760,
+    "minHeight": 600
+  }
+}

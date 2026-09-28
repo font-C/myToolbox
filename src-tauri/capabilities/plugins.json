@@ -1,0 +1,6 @@
+{
+  "identifier": "plugin-windows",
+  "description": "插件窗口基础能力：事件监听（拖拽）、窗口自关闭。文件/打印等敏感能力走 broker，不在此授权。",
+  "windows": ["plugin-*"],
+  "permissions": ["core:default", "core:window:allow-close"]
+}

@@ -1,0 +1,23 @@
+{
+  "formatVersion": 1,
+  "id": "clipboard-history",
+  "name": "剪贴板历史",
+  "description": "自动记录复制过的文本，一键取回；仅本机保存",
+  "author": "Font_C",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "minHostVersion": "0.4.0",
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": [
+    "clipboard:read",
+    "clipboard:write"
+  ],
+  "window": {
+    "title": "剪贴板历史 · 工具箱",
+    "width": 880,
+    "height": 680,
+    "minWidth": 600,
+    "minHeight": 540
+  }
+}

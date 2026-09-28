@@ -1,0 +1,19 @@
+{
+  "formatVersion": 1,
+  "id": "mental-math",
+  "name": "口算练习",
+  "description": "加减乘除口算，支持混合运算",
+  "author": "Font_C",
+  "version": "0.3.0",
+  "apiVersion": 1,
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": [],
+  "window": {
+    "title": "口算练习 · 工具箱",
+    "width": 900,
+    "height": 720,
+    "minWidth": 560,
+    "minHeight": 560
+  }
+}

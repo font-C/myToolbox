@@ -1,0 +1,24 @@
+{
+  "formatVersion": 1,
+  "id": "daily-calc",
+  "name": "生活计算",
+  "description": "房贷计算（等额本息/本金/组合贷）、日期计算、单位换算",
+  "author": "Font_C",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "minHostVersion": "0.4.0",
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": [
+    "dialog:save",
+    "fs:write",
+    "fs:read"
+  ],
+  "window": {
+    "title": "生活计算 · 工具箱",
+    "width": 940,
+    "height": 760,
+    "minWidth": 620,
+    "minHeight": 560
+  }
+}

@@ -3,9 +3,17 @@ node_modules/
 
 # 前端构建产物
 dist/
+plugins/*/dist/
 
 # Tauri / Rust 构建产物
 src-tauri/target/
+
+# 内置插件包（由 npm run build:plugins 生成，运行时嵌入应用）
+src-tauri/builtin/*.tbox
+src-tauri/builtin/manifests.json
+
+# 商店站点（由 CI 的 build-store 生成并发布到 GitHub Pages / Gitee）
+store/
 
 # 系统文件
 .DS_Store
@@ -19,3 +27,12 @@ npm-debug.log*
 .npm-cache/
 .test-data/
 doc/
+docs/
+
+# 商店签名私钥（绝不能入库）
+.secrets/
+.zcodeignore
+app-icon.png
+specs/
+.zcode/plans/
+.trae/

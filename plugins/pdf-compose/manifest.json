@@ -1,0 +1,19 @@
+{
+  "formatVersion": 1,
+  "id": "pdf-compose",
+  "name": "PDF 拼接",
+  "description": "多图片/多PDF自由拼版，支持标注与打印",
+  "author": "Font_C",
+  "version": "0.3.0",
+  "apiVersion": 1,
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": ["dialog:save", "fs:write", "fs:read", "print"],
+  "window": {
+    "title": "PDF 拼接 · 工具箱",
+    "width": 1200,
+    "height": 820,
+    "minWidth": 860,
+    "minHeight": 640
+  }
+}
