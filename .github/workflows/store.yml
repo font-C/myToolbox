@@ -115,18 +115,18 @@ jobs:
           # 镜像根说明与跳转页（store/ 之外不参与 --delete，保留人工改动）
           RAW_URL="https://gitee.com/${GITEE_REPO}/raw/master/store/"
           cat > gitee/README.md <<EOT
-# my-toolbox-store · 工具箱插件商店镜像源
+          # my-toolbox-store · 工具箱插件商店镜像源
 
-与主源（GitHub Pages）内容一致，由 CI（myToolbox 仓库 store.yml 的 mirror-gitee 任务）自动同步。
-应用内地址：${RAW_URL}（宿主商店页可一键切换）；契约见主仓库 specs/06-store-publish.md。
-EOT
+          与主源（GitHub Pages）内容一致，由 CI（myToolbox 仓库 store.yml 的 mirror-gitee 任务）自动同步。
+          应用内地址：${RAW_URL}（宿主商店页可一键切换）；契约见主仓库 specs/06-store-publish.md。
+          EOT
           cat > gitee/index.html <<'EOT'
-<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=./store/index.json">
-<title>my-toolbox-store · 插件商店镜像</title></head>
-<body><p>商店索引：<a href="./store/index.json">store/index.json</a></p></body></html>
-EOT
+          <!DOCTYPE html>
+          <html lang="zh-CN"><head><meta charset="utf-8">
+          <meta http-equiv="refresh" content="0; url=./store/index.json">
+          <title>my-toolbox-store · 插件商店镜像</title></head>
+          <body><p>商店索引：<a href="./store/index.json">store/index.json</a></p></body></html>
+          EOT
           cd gitee
           git add -A
           git diff --cached --quiet && echo "镜像无变化" && exit 0
