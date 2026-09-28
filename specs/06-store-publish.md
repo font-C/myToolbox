@@ -81,7 +81,10 @@ npm ci → npm run build:plugins
 ### 应用内的源配置
 
 主源与镜像 URL 内置于壳子（`src/stores/app.js::BUILTIN_STORE_SOURCES`），
-用户可在商店页切换、在设置页追加自定义源（任何托管 index.json 的 HTTPS 目录）。
+用户可在商店页切换。资源拉取统一走 Rust 端（`store_fetch` / reqwest），
+webview fetch 的 CORS 约束不再适用——Gitee raw 直连（`gitee.com/<owner>/<repo>/raw/master/store/`）
+这类不发 CORS 头的托管也能当源。注意 localStorage 里保存的旧源地址在升级后仍会生效，
+死源需在设置中手动清理（或等待用户主动切换）。
 
 ## 四、版本语义
 

@@ -7,6 +7,10 @@ import { useAppStore } from '../stores/app'
  * - 拉取当前源的 index.json（失败回退到最近一次缓存）
  * - 安装/更新插件：下载 .tbox → Rust 验签（Ed25519）+ sha256 校验 → 原子安装
  * - 启动时静默检查更新，供导航栏红点提示
+ *
+ * 资源拉取走 Rust 端 HTTP（store_fetch / reqwest）：webview 里的 fetch 受 CORS
+ * 约束（源是 tauri://localhost），Gitee raw 等不发 CORS 头的托管会被拦；
+ * Rust 端不受限，任何 https 目录都能当商店源。
  */
 const loading = ref(false)
 const error = ref(null)
@@ -30,14 +34,9 @@ function versionGt(a, b) {
   return false
 }
 
+/** 拉取商店资源，返回 ArrayBuffer（Rust 端 reqwest，非 2xx 直接抛错）。 */
 async function fetchWithTimeout(url, ms = 10000) {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), ms)
-  try {
-    return await fetch(url, { cache: 'no-store', signal: ctrl.signal })
-  } finally {
-    clearTimeout(timer)
-  }
+  return await invoke('store_fetch', { url, timeoutSecs: Math.max(5, Math.ceil(ms / 1000)) })
 }
 
 function cacheKey(url) {
@@ -72,9 +71,8 @@ async function fetchIndex({ silent = false } = {}) {
   loading.value = true
   error.value = null
   try {
-    const res = await fetchWithTimeout(new URL('index.json', url).href)
-    if (!res.ok) throw new Error(`商店返回 ${res.status}`)
-    const data = await res.json()
+    const buf = await fetchWithTimeout(new URL('index.json', url).href)
+    const data = JSON.parse(new TextDecoder().decode(buf))
     if (data.storeVersion !== 1) throw new Error(`不支持的商店索引版本 ${data.storeVersion}`)
     index.value = data
     fromCache.value = false
@@ -118,9 +116,8 @@ async function install(entry) {
   const app = useAppStore()
   const sourceUrl = app.activeStoreUrl
   const pkgUrl = new URL(entry.package, sourceUrl).href
-  const res = await fetchWithTimeout(pkgUrl, 60000)
-  if (!res.ok) throw new Error(`下载插件包失败：HTTP ${res.status}`)
-  const bytes = new Uint8Array(await res.arrayBuffer())
+  const buf = await fetchWithTimeout(pkgUrl, 60000)
+  const bytes = new Uint8Array(buf)
   await invoke('plugin_install', {
     payload: { bytes, source: 'store', sha256: entry.sha256, signature: entry.signature },
   })

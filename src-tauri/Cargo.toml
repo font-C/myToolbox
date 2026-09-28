@@ -1,6 +1,6 @@
 [package]
 name = "toolbox"
-version = "0.4.0"
+version = "0.4.1"
 description = "本地工具箱（插件化外壳 + 插件商店）"
 authors = ["you"]
 edition = "2021"
@@ -30,6 +30,9 @@ flate2 = "1"
 rand = "0.8"
 # 系统剪贴板（broker）：剪贴板历史插件的读写通道
 arboard = "3"
+# 商店拉取（Rust 端 HTTP）：绕开 webview CORS，任何 https 目录都能当商店源
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+tokio = { version = "1", features = ["rt", "macros"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "=0.6.4"

@@ -5,6 +5,7 @@ mod plugin_manifest;
 mod plugin_protocol;
 mod plugin_registry;
 mod print;
+mod store_http;
 
 use tauri::WindowEvent;
 
@@ -38,6 +39,8 @@ pub fn run() {
             plugin_registry::plugin_dev_list,
             plugin_installer::plugin_install,
             plugin_installer::plugin_uninstall,
+            // 商店资源拉取（Rust 端 HTTP，绕开 webview CORS）
+            store_http::store_fetch,
         ])
         .setup(|app| {
             // 插件注册表与开发插件表

@@ -12,7 +12,8 @@ const STORE_ACTIVE_KEY = 'toolbox.storeActive'
  */
 export const BUILTIN_STORE_SOURCES = [
   { name: 'GitHub', url: 'https://font-c.github.io/myToolbox/store/', builtin: true },
-  { name: 'Gitee', url: 'https://font-c.gitee.io/my-toolbox-store/', builtin: true },
+  // Gitee raw 直连（内容与主源一致，由 CI/手动同步）；拉取走 Rust 端，不受 CORS/反爬 UA 限制
+  { name: 'Gitee', url: 'https://gitee.com/font-c/my-toolbox-store/raw/master/store/', builtin: true },
 ]
 
 /**
