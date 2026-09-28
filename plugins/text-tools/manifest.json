@@ -4,7 +4,7 @@
   "name": "文本工具",
   "description": "字数统计、简繁转换、拼音标注、批量整理，全离线",
   "author": "Font_C",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "apiVersion": 1,
   "minHostVersion": "0.4.0",
   "entry": "index.html",
