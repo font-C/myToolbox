@@ -203,12 +203,10 @@ jobs:
             CHANGELOG=$(git log --no-merges --format='- %s (%h)' "${PREV_TAG}..${TAG}" | head -30)
           fi
           BODY="## 更新内容（${PREV_TAG:-} → ${TAG}）
-
-${CHANGELOG:-详见提交历史}
-
----
-下载：Windows（exe 安装包）· macOS（dmg）· Linux（deb / AppImage）。全程本地处理，不上传数据。
-插件商店：主源 GitHub Pages，镜像 Gitee raw（应用内商店页一键切换）。"
+          ${CHANGELOG:-详见提交历史}
+          ---
+          下载：Windows（exe 安装包）· macOS（dmg）· Linux（deb / AppImage）。全程本地处理，不上传数据。
+          插件商店：主源 GitHub Pages，镜像 Gitee raw（应用内商店页一键切换）。"
           echo "${BODY}"
 
           # 3) 查/建 Release（说明同步写入）
@@ -352,11 +350,9 @@ ${CHANGELOG:-详见提交历史}
             CHANGELOG=$(git log --no-merges --format='- %s (%h)' "${PREV_TAG}..${TAG}" | head -30)
           fi
           BODY="## 更新内容（${PREV_TAG:-} → ${TAG}）
-
-${CHANGELOG:-详见提交历史}
-
----
-下载：Windows（exe 安装包）· macOS（dmg）· Linux（deb / AppImage）。全程本地处理，不上传数据。"
+          ${CHANGELOG:-详见提交历史}
+          ---
+          下载：Windows（exe 安装包）· macOS（dmg）· Linux（deb / AppImage）。全程本地处理，不上传数据。"
 
           # tag 同步到 Gitee（Gitee Release 依附于 tag）
           git push "https://${OWNER}:${GITEE_TOKEN}@gitee.com/${GREPO}.git" "refs/tags/${TAG}" --force 2>/dev/null || true
