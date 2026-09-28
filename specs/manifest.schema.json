@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MyToolbox Plugin Manifest",
+  "description": "MyToolbox 插件清单（formatVersion 1）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["formatVersion", "id", "name", "version", "apiVersion"],
+  "properties": {
+    "formatVersion": { "const": 1, "description": "包格式版本，当前恒为 1" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,47}$",
+      "description": "插件唯一标识，上架后不可更改"
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 32, "description": "显示名称" },
+    "description": { "type": "string", "maxLength": 120, "description": "一句话描述" },
+    "author": { "type": "string", "maxLength": 64, "description": "作者/出品方" },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+([-+][0-9A-Za-z.-]+)?$",
+      "description": "插件版本 x.y.z"
+    },
+    "apiVersion": { "type": "integer", "minimum": 1, "description": "依赖的 SDK 契约版本" },
+    "entry": {
+      "type": "string",
+      "default": "index.html",
+      "pattern": "^(?!/)(?!.*\\.\\.).+\\.html$",
+      "description": "入口 HTML（包内相对路径）"
+    },
+    "icon": {
+      "type": "string",
+      "default": "icon.png",
+      "pattern": "^(?!/)(?!.*\\.\\.).+\\.(png|svg)$",
+      "description": "图标文件（256x256 PNG 推荐）"
+    },
+    "permissions": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string",
+        "enum": ["dialog:open", "dialog:save", "fs:read", "fs:write", "print", "pdf:optimize", "pdf:crypt", "clipboard:read", "clipboard:write"]
+      },
+      "description": "声明需要的能力；只声明实际用到的"
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "插件窗口外观",
+      "properties": {
+        "title": { "type": "string", "description": "窗口标题，缺省为 name" },
+        "width": { "type": "number", "exclusiveMinimum": 0, "default": 1100 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "default": 800 },
+        "minWidth": { "type": "number", "exclusiveMinimum": 0, "default": 480 },
+        "minHeight": { "type": "number", "exclusiveMinimum": 0, "default": 480 },
+        "resizable": { "type": "boolean", "default": true }
+      }
+    },
+    "minHostVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+",
+      "description": "要求的宿主最低版本"
+    }
+  }
+}
