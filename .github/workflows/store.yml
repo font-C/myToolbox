@@ -4,11 +4,20 @@ name: Build & Publish Plugin Store
 # → 发布到 GitHub Pages（主源）与 Gitee（镜像源）。
 # 契约见 specs/06-store-publish.md
 
+# 触发：master 分支推送且涉及插件/商店文件，或手动。
+# 不用 tag 触发：github-pages 环境默认部署保护只放行默认分支，
+# tag ref 的运行会在 deploy-pages 阶段被拒（Environment protection rules）。
+# 商店语义 = 跟随 master 最新构建，与发版 tag 内容天然一致（tag 总是打在 master 头上）。
 on:
   workflow_dispatch:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - master
+    paths:
+      - 'plugins/**'
+      - 'packages/plugin-sdk/**'
+      - 'scripts/build-store.mjs'
+      - '.github/workflows/store.yml'
 
 permissions:
   contents: read

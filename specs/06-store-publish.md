@@ -57,7 +57,8 @@ store/
 
 ## 三、发布管线（CI：.github/workflows/store.yml）
 
-触发：push tag `v*` 或手动 workflow_dispatch。
+触发：push master 且改动涉及 `plugins/**`、`packages/plugin-sdk/**`、商店脚本/工作流，或手动 workflow_dispatch。
+（不用 tag 触发：github-pages 环境默认部署保护只放行默认分支；商店语义 = 跟随 master 最新构建。）
 
 ```
 npm ci → npm run build:plugins
