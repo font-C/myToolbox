@@ -108,7 +108,9 @@ jobs:
           fi
           git config --global user.name "store-bot"
           git config --global user.email "store-bot@users.noreply.github.com"
-          git clone --depth 1 "https://x-access-token:${GITEE_TOKEN}@gitee.com/${GITEE_REPO}.git" gitee
+          # Gitee 令牌认证：用户名必须是 Gitee 用户名（owner），x-access-token 无效
+          GITEE_OWNER="${GITEE_REPO%%/*}"
+          git clone --depth 1 "https://${GITEE_OWNER}:${GITEE_TOKEN}@gitee.com/${GITEE_REPO}.git" gitee
           # 与 GitHub Pages 相同的布局：站点根下 store/ 子目录
           mkdir -p gitee/store
           rsync -a --delete store/ gitee/store/
