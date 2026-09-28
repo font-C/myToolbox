@@ -99,7 +99,7 @@ function computeUpdates() {
     updates.value = []
     return
   }
-  const installed = new Map(appStore.plugins.map((p) => [p.id, p.manifest.version]))
+  const installed = new Map(app.plugins.map((p) => [p.id, p.manifest.version]))
   updates.value = (index.value.plugins ?? []).filter((entry) => {
     const current = installed.get(entry.id)
     return current ? versionGt(entry.version, current) : false
@@ -108,7 +108,7 @@ function computeUpdates() {
 
 function installStateOf(entry) {
   const app = useAppStore()
-  const current = appStore.plugins.find((p) => p.id === entry.id)
+  const current = app.plugins.find((p) => p.id === entry.id)
   if (!current) return 'installable'
   if (versionGt(entry.version, current.manifest.version)) return 'updatable'
   return 'installed'
