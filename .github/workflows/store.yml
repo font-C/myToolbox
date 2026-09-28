@@ -50,6 +50,9 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
+        with:
+          # 仓库未启用 Pages 时由工作流自动启用（需 pages: write 权限，已声明）
+          enablement: true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
