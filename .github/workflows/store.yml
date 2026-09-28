@@ -54,10 +54,16 @@ jobs:
           # 仓库未启用 Pages 时由工作流自动启用（需 pages: write 权限，已声明）
           enablement: true
 
+      - name: Stage Pages site
+        run: |
+          # 站点根下保留 store/ 子目录：应用内置源 URL 为 …/myToolbox/store/（与已发版宿主一致）
+          mkdir -p site
+          cp -R store site/store
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: store
+          path: site
 
   deploy-pages:
     needs: build-store
@@ -94,7 +100,9 @@ jobs:
           git config --global user.name "store-bot"
           git config --global user.email "store-bot@users.noreply.github.com"
           git clone --depth 1 "https://x-access-token:${GITEE_TOKEN}@gitee.com/${GITEE_REPO}.git" gitee
-          rsync -a --delete store/ gitee/ --exclude .git
+          # 与 GitHub Pages 相同的布局：站点根下 store/ 子目录
+          mkdir -p gitee/store
+          rsync -a --delete store/ gitee/store/
           cd gitee
           git add -A
           git diff --cached --quiet && echo "镜像无变化" && exit 0

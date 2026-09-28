@@ -14,6 +14,10 @@ store/
 
 由 `scripts/build-store.mjs` 生成（输入是 `npm run build:plugins` 的产物）。
 
+> **托管布局**：Pages/镜像站点的根目录下保留一层 `store/` 子目录
+> （即索引 URL 形如 `https://<host>/<path>/store/index.json`），
+> 与宿主内置源 URL（`src/stores/app.js::BUILTIN_STORE_SOURCES`）保持一致。
+
 ## 二、index.json 契约（storeVersion 1）
 
 ```json
