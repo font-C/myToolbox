@@ -1,6 +1,6 @@
 [package]
 name = "toolbox"
-version = "0.4.1"
+version = "0.4.2"
 description = "本地工具箱（插件化外壳 + 插件商店）"
 authors = ["you"]
 edition = "2021"
