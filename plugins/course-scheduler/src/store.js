@@ -5,6 +5,7 @@
 import { defineStore } from 'pinia'
 import {
   emptyProject,
+  DEFAULT_RULES,
   slotCount,
   slotsPerDay,
   uid,
@@ -19,6 +20,7 @@ import {
   buildSlotMaps,
   moveUnit as solverMove,
   swapUnits as solverSwap,
+  forceSwapUnits as solverSwapForce,
   removeUnit as solverRemove,
   missingPeriodsOf,
   checkScheduleIntegrity,
@@ -60,8 +62,8 @@ export const usePlannerStore = defineStore('planner', {
     },
 
     /** Promise 风格确认框：await store.confirm('确定清空？') */
-    confirm(text, { danger = false } = {}) {
-      this.confirmBox = { text, danger }
+    confirm(text, { danger = false, okText = '确定', cancelText = '取消' } = {}) {
+      this.confirmBox = { text, danger, okText, cancelText }
       return new Promise((resolve) => {
         this._confirmResolve?.(false)
         this._confirmResolve = resolve
@@ -108,6 +110,13 @@ export const usePlannerStore = defineStore('planner', {
       this.project.classes.push(c)
       this.persist()
       return c
+    },
+    /** 批量生成班级（names 为已排好序的名称），仅持久化一次 */
+    bulkAddClasses(names, gradeId) {
+      const created = names.map((name) => ({ id: uid('c'), name, gradeId: gradeId ?? null }))
+      this.project.classes.push(...created)
+      this.persist()
+      return created
     },
     updateClass(id, patch) {
       const c = this.project.classes.find((x) => x.id === id)
@@ -165,7 +174,7 @@ export const usePlannerStore = defineStore('planner', {
 
     // ---- 科目 ----
     addSubject(name, props = {}) {
-      const s = { id: uid('s'), name, isMajor: false, isPe: false, double: false, weekly: 2, ...props }
+      const s = { id: uid('s'), name, gradeId: null, roomShared: false, isMajor: false, isPe: false, double: false, weekly: 2, ...props }
       this.project.subjects.push(s)
       this.persist()
       return s
@@ -174,8 +183,11 @@ export const usePlannerStore = defineStore('planner', {
       const s = this.project.subjects.find((x) => x.id === id)
       if (!s) return
       Object.assign(s, patch)
-      // 周课时变化后，已排单元若超出新课时数，移出多余单元
+      // 周课时变化后：先同步该科目所有任务的 periods，再移出超出新课时数的多余单元
       if (patch.weekly !== undefined) {
+        for (const a of this.project.assignments) {
+          if (a.subjectId === id) a.periods = s.weekly
+        }
         for (const a of this.project.assignments) {
           if (a.subjectId !== id) continue
           const need = unitCountOf(a, s)
@@ -227,6 +239,56 @@ export const usePlannerStore = defineStore('planner', {
       this.persist()
     },
 
+    /**
+     * 按「科目 × 年级」自动生成教学任务的班级+科目组合（只需再配教师）。
+     * - 保留仍适用的既有任务（含已配教师）
+     * - 补齐缺失的（班级,科目），教师留空待配
+     * - 清理不再适用的任务并移出课表
+     */
+    syncAssignmentsFromSubjects() {
+      const p = this.project
+      const expect = new Set()
+      for (const c of p.classes) {
+        for (const s of p.subjects) {
+          if (!s.gradeId || s.gradeId === c.gradeId) expect.add(`${c.id}::${s.id}`)
+        }
+      }
+      const key = (a) => `${a.classId}::${a.subjectId}`
+      const present = new Set()
+      const next = []
+      let removed = 0
+      for (const a of p.assignments) {
+        const k = key(a)
+        if (expect.has(k)) {
+          next.push(a)
+          present.add(k)
+        } else {
+          delete p.schedule[a.id]
+          removed++
+        }
+      }
+      let added = 0
+      for (const k of expect) {
+        if (present.has(k)) continue
+        const [classId, subjectId] = k.split('::')
+        const subj = p.subjects.find((s) => s.id === subjectId)
+        next.push({ id: uid('a'), classId, subjectId, teacherId: null, periods: subj?.weekly ?? 1 })
+        added++
+      }
+      p.assignments = next
+      this.lastResult = null
+      this.persist()
+      this.notify(`已按科目生成任务：新增 ${added} 条，移除 ${removed} 条`, added || removed ? 'ok' : 'info')
+    },
+
+    // ---- 排课规则开关 ----
+    toggleRule(key) {
+      if (!this.project.rules) this.project.rules = { ...DEFAULT_RULES }
+      this.project.rules[key] = !this.project.rules[key]
+      this.lastResult = null
+      this.persist()
+    },
+
     // ---- 课表操作 ----
     clearSchedule() {
       this.project.schedule = {}
@@ -249,6 +311,11 @@ export const usePlannerStore = defineStore('planner', {
     },
     doSwapUnits(aId, aUnit, bId, bUnit) {
       const res = solverSwap(this.project, aId, aUnit, bId, bUnit)
+      if (res.ok) this.persist()
+      return res
+    },
+    doSwapUnitsForce(aId, aUnit, bId, bUnit) {
+      const res = solverSwapForce(this.project, aId, aUnit, bId, bUnit)
       if (res.ok) this.persist()
       return res
     },
@@ -303,7 +370,7 @@ export const usePlannerStore = defineStore('planner', {
       this.project = loadSampleProject()
       this.lastResult = null
       this.persist()
-      this.notify('已载入示例数据（初一 4 个班）', 'ok')
+      this.notify(`已载入示例数据（${this.project.grades.length} 个年级 ${this.project.classes.length} 个班）`, 'ok')
     },
     newProject() {
       this.project = emptyProject()

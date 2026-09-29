@@ -7,7 +7,7 @@
  */
 import * as XLSX from 'xlsx'
 import { toolbox } from '@toolbox/plugin-sdk'
-import { emptyProject, guessSubjectProps } from './solver/model.js'
+import { emptyProject, guessSubjectProps, DEFAULT_RULES } from './solver/model.js'
 
 const SESSION_KEY = 'course-scheduler.session'
 
@@ -48,6 +48,12 @@ export function normalizeProject(raw) {
   }
   if (typeof p.classBlocked !== 'object' || !p.classBlocked) p.classBlocked = {}
   if (typeof p.schedule !== 'object' || !p.schedule) p.schedule = {}
+  if (typeof p.rules !== 'object' || !p.rules) p.rules = { ...DEFAULT_RULES }
+  else p.rules = { ...DEFAULT_RULES, ...p.rules }
+  for (const s of p.subjects) {
+    if (!('gradeId' in s)) s.gradeId = null
+    if (typeof s.roomShared !== 'boolean') s.roomShared = false
+  }
   // 清理指向已删实体的课表项
   const ids = new Set(p.assignments.map((a) => a.id))
   for (const key of Object.keys(p.schedule)) {
@@ -273,7 +279,8 @@ export function parseClasses(text) {
   return { items, errors }
 }
 
-export function parseSubjects(text) {
+export function parseSubjects(text, grades = []) {
+  const gradeByName = new Map(grades.map((g) => [g.name, g]))
   const seen = new Set()
   const items = []
   const errors = []
@@ -281,15 +288,23 @@ export function parseSubjects(text) {
     const cols = splitLine(line)
     const name = cols[0]
     if (!name) return
-    if (seen.has(name)) {
-      errors.push(`第 ${i + 1} 行：科目「${name}」重复`)
+    // 每行：科目 [<Tab>周课时] [<Tab>年级]
+    let gradeId = null
+    if (cols[2]) {
+      const g = gradeByName.get(cols[2])
+      if (g) gradeId = g.id
+      else errors.push(`第 ${i + 1} 行：找不到年级「${cols[2]}」`)
+    }
+    const key = `${name}::${gradeId ?? ''}`
+    if (seen.has(key)) {
+      errors.push(`第 ${i + 1} 行：科目「${name}」${gradeId ? '在该年级已定义' : ''}重复`)
       return
     }
-    seen.add(name)
+    seen.add(key)
     const props = guessSubjectProps(name)
     const weekly = Number(cols[1])
     if (Number.isFinite(weekly) && weekly > 0) props.weekly = Math.round(weekly)
-    items.push({ name, ...props })
+    items.push({ name, gradeId, ...props })
   })
   return { items, errors }
 }
@@ -314,6 +329,20 @@ export function parseAssignments(text, project) {
       return
     }
     const subj = subjByName.get(subjName)
+    if (subj && subj.gradeId && subj.gradeId !== cls.gradeId) {
+      // 同名科目按年级区分：优先取与该班年级匹配（或全局）的那一个
+      const matched = project.subjects.find(
+        (s) => s.name === subjName && (!s.gradeId || s.gradeId === cls.gradeId)
+      )
+      if (matched) items.push({
+        classId: cls.id,
+        subjectId: matched.id,
+        teacherId: teacher.id,
+        periods: Number.isFinite(periods) && periods > 0 ? Math.round(periods) : matched.weekly,
+      })
+      else errors.push(`第 ${i + 1} 行：科目「${subjName}」不适用于班级「${clsName}」的年级`)
+      return
+    }
     if (!subj) {
       errors.push(`第 ${i + 1} 行：找不到科目「${subjName}」`)
       return

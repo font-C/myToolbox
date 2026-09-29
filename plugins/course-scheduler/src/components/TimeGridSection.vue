@@ -1,16 +1,11 @@
 <script setup>
 import { computed } from 'vue'
 import { usePlannerStore } from '../store.js'
-import { PERIOD_PRESETS, periodsFromPreset } from '../solver/model.js'
+import { SESSIONS, sessionInfo, sessionOrder } from '../solver/model.js'
 
 const store = usePlannerStore()
 
 const previewSlots = computed(() => store.project.days.length * store.project.periods.length)
-
-function applyPreset(p) {
-  store.applyTimegrid([...store.project.days], periodsFromPreset(p.am, p.pm))
-  store.notify(`已应用预设：${p.name}`, 'ok')
-}
 
 function addDay() {
   const days = [...store.project.days, `第${store.project.days.length + 1}天`]
@@ -29,17 +24,18 @@ function removeDay(i) {
   )
 }
 
+/** 新增某个时段类型的节次；插入到该时段类型块的末尾，保持一天内先后顺序 */
 function addPeriod(session) {
-  const amCount = store.project.periods.filter((p) => p.session === 'am').length
-  const pmCount = store.project.periods.length - amCount
-  const label =
-    session === 'am' ? `第${amCount + 1}节` : `下午第${pmCount + 1}节`
-  // 追加到对应时段末尾
+  const countInSession = store.project.periods.filter((p) => p.session === session).length
+  const label = `${sessionInfo(session).label}第${countInSession + 1}节`
   const periods = [...store.project.periods]
+  const order = sessionOrder(session)
   let insertAt = periods.length
-  if (session === 'am') {
-    insertAt = periods.findIndex((p) => p.session === 'pm')
-    if (insertAt === -1) insertAt = periods.length
+  for (let i = 0; i < periods.length; i++) {
+    if (sessionOrder(periods[i].session) > order) {
+      insertAt = i
+      break
+    }
   }
   periods.splice(insertAt, 0, { label, session })
   store.applyTimegrid(store.project.days, periods)
@@ -49,9 +45,9 @@ function renamePeriod(i, label) {
   periods[i] = { ...periods[i], label: label || periods[i].label }
   store.applyTimegrid(store.project.days, periods)
 }
-function toggleSession(i) {
+function updateSession(i, session) {
   const periods = [...store.project.periods]
-  periods[i] = { ...periods[i], session: periods[i].session === 'am' ? 'pm' : 'am' }
+  periods[i] = { ...periods[i], session }
   store.applyTimegrid(store.project.days, periods)
 }
 function removePeriod(i) {
@@ -68,19 +64,10 @@ function removePeriod(i) {
     <header class="page__head">
       <h2 class="page__title">时间结构</h2>
       <p class="page__desc">
-        定义每周上课天数与每天节次。修改时间结构会清空已排课表。
+        定义每周上课天数与每天节次，节次分「早晨 / 上午 / 下午 / 晚上」四类。修改时间结构会清空已排课表。
         当前共 <b>{{ previewSlots }}</b> 个排课时段。
       </p>
     </header>
-
-    <div class="card">
-      <div class="card__title">快速预设</div>
-      <div class="presets">
-        <button v-for="p in PERIOD_PRESETS" :key="p.name" class="btn" @click="applyPreset(p)">
-          {{ p.name }}
-        </button>
-      </div>
-    </div>
 
     <div class="card">
       <div class="card__title">上课日（{{ store.project.days.length }} 天）</div>
@@ -116,14 +103,9 @@ function removePeriod(i) {
             :value="p.label"
             @change="renamePeriod(i, $event.target.value)"
           />
-          <button
-            class="tag"
-            :class="p.session === 'am' ? 'tag--am' : 'tag--pm'"
-            :title="p.session === 'am' ? '上午（点击改为下午）' : '下午（点击改为上午）'"
-            @click="toggleSession(i)"
-          >
-            {{ p.session === 'am' ? '上午' : '下午' }}
-          </button>
+          <select class="input select--session" :value="p.session" @change="updateSession(i, $event.target.value)">
+            <option v-for="s in SESSIONS" :key="s.id" :value="s.id">{{ s.label }}</option>
+          </select>
           <button
             class="btn btn--icon"
             title="删除该节"
@@ -135,8 +117,9 @@ function removePeriod(i) {
         </div>
       </div>
       <div class="period-actions">
-        <button class="btn" @click="addPeriod('am')">＋ 上午节</button>
-        <button class="btn" @click="addPeriod('pm')">＋ 下午节</button>
+        <button v-for="s in SESSIONS" :key="s.id" class="btn" @click="addPeriod(s.id)">
+          ＋ {{ s.label }}节
+        </button>
       </div>
     </div>
   </section>
@@ -170,11 +153,6 @@ function removePeriod(i) {
   font-weight: 600;
   margin-bottom: 12px;
 }
-.presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .day-list, .period-list {
   display: flex;
   flex-direction: column;
@@ -203,21 +181,14 @@ function removePeriod(i) {
   outline: none;
 }
 .input:focus { border-color: var(--c-primary); }
+.select--session { min-width: 86px; }
 .btn--icon {
   padding: 7px 10px;
   color: var(--c-text-muted);
 }
-.tag {
-  border: 0;
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.tag--am { background: #dbeafe; color: #1d4ed8; }
-.tag--pm { background: #fef3c7; color: #b45309; }
 .period-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }

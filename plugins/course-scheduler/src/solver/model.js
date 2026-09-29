@@ -5,8 +5,25 @@
  * 时段槽 slot = dayIndex * periods.length + periodIndex，全部用一维下标参与运算。
  */
 
+export const SESSION_DAWN = 'dawn'
 export const SESSION_AM = 'am'
 export const SESSION_PM = 'pm'
+export const SESSION_EVE = 'eve'
+
+/** 一天内的时段类型（按时间先后排列）及其展示名/样式标记 */
+export const SESSIONS = [
+  { id: SESSION_DAWN, label: '早晨', cls: 'tag--dawn', th: 'th--dawn', color: '#f0abfc' },
+  { id: SESSION_AM, label: '上午', cls: 'tag--am', th: 'th--am', color: '#1d4ed8' },
+  { id: SESSION_PM, label: '下午', cls: 'tag--pm', th: 'th--pm', color: '#b45309' },
+  { id: SESSION_EVE, label: '晚上', cls: 'tag--eve', th: 'th--eve', color: '#7c3aed' },
+]
+export function sessionInfo(id) {
+  return SESSIONS.find((s) => s.id === id) ?? SESSIONS[1]
+}
+/** session 在一天中的先后序号 */
+export function sessionOrder(id) {
+  return SESSIONS.findIndex((s) => s.id === id)
+}
 
 let uidSeed = 0
 export function uid(prefix) {
@@ -16,12 +33,6 @@ export function uid(prefix) {
 export const DEFAULT_DAYS = ['周一', '周二', '周三', '周四', '周五']
 
 /** 常见学段预设：上午节数 / 下午节数 */
-export const PERIOD_PRESETS = [
-  { name: '小学（上午4节+下午3节）', am: 4, pm: 3 },
-  { name: '初中（上午4节+下午4节）', am: 4, pm: 4 },
-  { name: '高中（上午4节+下午4节）', am: 4, pm: 4 },
-]
-
 export function periodsFromPreset(am, pm) {
   const periods = []
   for (let i = 1; i <= am; i++) periods.push({ label: `第${i}节`, session: SESSION_AM })
@@ -29,8 +40,19 @@ export function periodsFromPreset(am, pm) {
   return periods
 }
 
+/** 空白方案默认：早晨1 + 上午4 + 下午4 + 晚上2 */
 export function defaultPeriods() {
-  return periodsFromPreset(4, 4)
+  const periods = []
+  for (const [count, session] of [
+    [1, SESSION_DAWN],
+    [4, SESSION_AM],
+    [4, SESSION_PM],
+    [2, SESSION_EVE],
+  ]) {
+    const info = sessionInfo(session)
+    for (let i = 1; i <= count; i++) periods.push({ label: `${info.label}第${i}节`, session })
+  }
+  return periods
 }
 
 /** 科目默认周课时与属性猜测（用于快速录入，均可手动改） */
@@ -41,6 +63,17 @@ export function guessSubjectProps(name) {
   if (/(信息|信息技术|机)/.test(n)) return { isMajor: false, isPe: false, double: true, weekly: 2 }
   if (/(实验|劳动)/.test(n)) return { isMajor: false, isPe: false, double: false, weekly: 1 }
   return { isMajor: false, isPe: false, double: false, weekly: 2 }
+}
+
+/** 排课规则开关默认值（软约束是否启用） */
+export const DEFAULT_RULES = {
+  majorGold: true, // 主科优先 上午1-3节 / 下午1-2节
+  minorPm: true, // 副科避开黄金时段，排在其余课时
+  peAvoid: true, // 体育避开午间饭点与黄金时段
+  essayPm: true, // 作文（连堂）优先 周三至周五 下午第1-2节
+  minorEve: true, // 晚上少排副科
+  pePmOnly: true, // 体育只排下午（不排早晨/上午/晚上；对自动排课与手动调课生效）
+  skipDawn: true, // 早晨时段不自动排课（留作早读/晨会；手动调整不受限）
 }
 
 /** 空白方案 */
@@ -57,6 +90,8 @@ export function emptyProject() {
     classBlocked: {},
     /** 课表结果：assignmentId -> [slot...]（每单元占 1 或 2 个相邻槽） */
     schedule: {},
+    /** 排课规则开关（软约束是否启用） */
+    rules: { ...DEFAULT_RULES },
   }
 }
 

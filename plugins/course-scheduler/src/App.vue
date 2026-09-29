@@ -6,6 +6,8 @@ import TimeGridSection from './components/TimeGridSection.vue'
 import ClassesSection from './components/ClassesSection.vue'
 import TeachersSection from './components/TeachersSection.vue'
 import SubjectsSection from './components/SubjectsSection.vue'
+import TeachingTasksSection from './components/TeachingTasksSection.vue'
+import RulesSection from './components/RulesSection.vue'
 import SolveSection from './components/SolveSection.vue'
 import TimetableSection from './components/TimetableSection.vue'
 import ExportSection from './components/ExportSection.vue'
@@ -19,7 +21,9 @@ const sections = [
     { id: 'time', label: '时间结构', icon: '🕐' },
     { id: 'classes', label: '班级', icon: '🏫', count: () => store.project.classes.length },
     { id: 'teachers', label: '教师', icon: '👤', count: () => store.project.teachers.length },
-    { id: 'subjects', label: '科目与任务', icon: '📚', count: () => store.project.assignments.length },
+    { id: 'subjects', label: '科目', icon: '📚', count: () => store.project.subjects.length },
+    { id: 'tasks', label: '教学任务', icon: '🧩', count: () => store.project.assignments.length },
+    { id: 'rules', label: '排课规则', icon: '⚙️' },
   ] },
   { group: '排课', items: [
     { id: 'solve', label: '自动排课', icon: '⚡', alert: () => store.problemErrors.length },
@@ -111,6 +115,8 @@ async function doSave() {
         classes: ClassesSection,
         teachers: TeachersSection,
         subjects: SubjectsSection,
+        tasks: TeachingTasksSection,
+        rules: RulesSection,
         solve: SolveSection,
         timetable: TimetableSection,
         export: ExportSection,
@@ -129,13 +135,13 @@ async function doSave() {
       <div class="dialog">
         <div class="dialog__text">{{ store.confirmBox.text }}</div>
         <div class="dialog__actions">
-          <button class="btn" @click="store.resolveConfirm(false)">取消</button>
+          <button class="btn" @click="store.resolveConfirm(false)">{{ store.confirmBox.cancelText || '取消' }}</button>
           <button
             class="btn"
             :class="store.confirmBox.danger ? 'btn--danger' : 'btn--primary'"
             @click="store.resolveConfirm(true)"
           >
-            确定
+            {{ store.confirmBox.okText || '确定' }}
           </button>
         </div>
       </div>

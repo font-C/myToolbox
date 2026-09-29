@@ -1,10 +1,36 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { usePlannerStore } from '../store.js'
+import { parseTeachers } from '../io.js'
 
 const store = usePlannerStore()
 const selectedTeacherId = ref('')
 const newTeacherName = ref('')
+const tImportOpen = ref(false)
+const tImportText = ref('')
+const tImportReport = ref(null)
+
+function toggleTeacherImport() {
+  tImportOpen.value = !tImportOpen.value
+  tImportText.value = ''
+  tImportReport.value = null
+}
+function runTeacherImport() {
+  tImportReport.value = parseTeachers(tImportText.value)
+}
+function applyTeacherImport() {
+  if (!tImportReport.value) return
+  const { items } = tImportReport.value
+  let added = 0
+  for (const it of items) {
+    if (!store.project.teachers.some((t) => t.name === it.name)) {
+      store.addTeacher(it.name)
+      added++
+    }
+  }
+  store.notify(`已导入 ${added} 位教师`, 'ok')
+  toggleTeacherImport()
+}
 
 const selectedTeacher = computed(() =>
   store.project.teachers.find((t) => t.id === selectedTeacherId.value)
@@ -64,6 +90,9 @@ function toggleBlocked(teacherId, slot) {
     <div class="card">
       <div class="card__toolbar">
         <div class="card__title">教师列表（{{ store.project.teachers.length }}）</div>
+        <button class="btn" @click="toggleTeacherImport">
+          {{ tImportOpen ? '收起' : '批量导入' }}
+        </button>
       </div>
       <div class="add-row">
         <input
@@ -73,6 +102,24 @@ function toggleBlocked(teacherId, slot) {
           @keyup.enter="addTeacher"
         />
         <button class="btn btn--primary" @click="addTeacher">＋ 教师</button>
+      </div>
+
+      <div v-if="tImportOpen" class="import-box">
+        <div class="import-box__hint">每行一位教师姓名，例如：</div>
+        <textarea v-model="tImportText" class="textarea" rows="5" placeholder="王老师&#10;李老师&#10;张老师"></textarea>
+        <div class="import-box__actions">
+          <button class="btn" @click="runTeacherImport">解析</button>
+          <button
+            v-if="tImportReport && tImportReport.items.length"
+            class="btn btn--primary"
+            @click="applyTeacherImport"
+          >
+            导入 {{ tImportReport.items.length }} 位
+          </button>
+        </div>
+        <div v-if="tImportReport && tImportReport.errors.length" class="import-errors">
+          <div v-for="(e, i) in tImportReport.errors" :key="i" class="import-errors__item">⚠ {{ e }}</div>
+        </div>
       </div>
       <table v-if="store.project.teachers.length" class="table">
         <thead>
@@ -135,7 +182,7 @@ function toggleBlocked(teacherId, slot) {
         </thead>
         <tbody>
           <tr v-for="(p, pi) in store.project.periods" :key="pi">
-            <th class="grid-table__head" :class="p.session === 'am' ? 'th--am' : 'th--pm'">
+            <th class="grid-table__head" :class="'th--' + p.session">
               {{ p.label }}
             </th>
             <td v-for="(d, di) in store.project.days" :key="di">
@@ -235,6 +282,8 @@ function toggleBlocked(teacherId, slot) {
 }
 .th--am { color: #1d4ed8; }
 .th--pm { color: #b45309; }
+.th--dawn { color: #a21caf; }
+.th--eve { color: #7c3aed; }
 .slot {
   width: 44px;
   height: 26px;
@@ -255,4 +304,27 @@ function toggleBlocked(teacherId, slot) {
   padding: 4px 12px;
   font-size: 12.5px;
 }
+.import-box {
+  background: var(--c-bg);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.import-box__hint { font-size: 12.5px; color: var(--c-text-muted); margin-bottom: 8px; }
+.import-box__actions { display: flex; gap: 8px; margin-top: 8px; }
+.import-errors { margin-top: 8px; }
+.import-errors__item { font-size: 12.5px; color: #b45309; margin-top: 4px; }
+.textarea {
+  width: 100%;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  color: var(--c-text);
+  background: var(--c-surface);
+}
+.textarea:focus { border-color: var(--c-primary); }
 </style>

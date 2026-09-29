@@ -1,7 +1,7 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { usePlannerStore } from '../store.js'
-import { parseTeachers, parseClasses, parseSubjects, parseAssignments } from '../io.js'
+import { parseSubjects } from '../io.js'
 import { guessSubjectProps } from '../solver/model.js'
 
 const store = usePlannerStore()
@@ -9,6 +9,7 @@ const importTab = ref('')
 const importText = ref('')
 const importReport = ref(null)
 const newSubjectName = ref('')
+const newSubjectSelectedGrades = ref([])
 
 function addSubject() {
   const name = newSubjectName.value.trim()
@@ -16,35 +17,28 @@ function addSubject() {
     store.notify('请输入科目名称', 'warn')
     return
   }
-  store.addSubject(name, guessSubjectProps(name))
+  const base = guessSubjectProps(name)
+  const gids = [...new Set(newSubjectSelectedGrades.value)]
+  if (!gids.length) {
+    store.addSubject(name, { ...base, gradeId: null })
+  } else {
+    let added = 0
+    for (const gid of gids) {
+      if (!store.project.subjects.some((s) => s.name === name && (s.gradeId ?? null) === gid)) {
+        store.addSubject(name, { ...base, gradeId: gid })
+        added++
+      }
+    }
+    if (added === 0) store.notify('所选年级均已存在同名科目', 'warn')
+  }
   newSubjectName.value = ''
-}
-
-const warnOf = (a) => {
-  const subj = store.project.subjects.find((s) => s.id === a.subjectId)
-  if (!subj) return ''
-  return subj.double && a.periods % 2 !== 0 ? '连堂科目课时须为偶数' : ''
+  newSubjectSelectedGrades.value = []
 }
 
 function removeSubject(s) {
   store
     .confirm(`删除科目「${s.name}」会同时删除相关教学任务与课表，确定？`, { danger: true })
     .then((ok) => ok && store.removeSubject(s.id))
-}
-
-function addAssignment() {
-  if (!store.project.classes.length || !store.project.subjects.length || !store.project.teachers.length) {
-    store.notify('请先完善班级、科目与教师', 'warn')
-    return
-  }
-  store.addAssignment(
-    store.project.classes[0].id,
-    store.project.subjects[0].id,
-    store.project.teachers[0].id
-  )
-}
-function removeAssignment(a) {
-  store.removeAssignment(a.id)
 }
 
 function openImport(tab) {
@@ -54,71 +48,37 @@ function openImport(tab) {
 }
 
 function runImport() {
-  const text = importText.value
-  let result
-  if (importTab.value === 'teachers') result = parseTeachers(text)
-  else if (importTab.value === 'classes') result = parseClasses(text)
-  else if (importTab.value === 'subjects') result = parseSubjects(text)
-  else if (importTab.value === 'assignments') result = parseAssignments(text, store.project)
-  importReport.value = result
+  importReport.value = parseSubjects(importText.value, store.project.grades)
 }
 
 function applyImport() {
   if (!importReport.value) return
   const { items } = importReport.value
-  if (importTab.value === 'teachers') {
-    for (const it of items) if (!store.project.teachers.some((t) => t.name === it.name)) store.addTeacher(it.name)
-  } else if (importTab.value === 'classes') {
-    const gradeCache = new Map()
-    for (const it of items) {
-      let gradeId = null
-      if (it.grade) {
-        if (!gradeCache.has(it.grade)) {
-          const existing = store.project.grades.find((g) => g.name === it.grade)
-          gradeCache.set(it.grade, existing ? existing.id : store.addGrade(it.grade).id)
-        }
-        gradeId = gradeCache.get(it.grade)
-      }
-      if (!store.project.classes.some((c) => c.name === it.name)) store.addClass(it.name, gradeId)
+  let added = 0
+  for (const it of items) {
+    const gid = it.gradeId ?? null
+    if (!store.project.subjects.some((s) => s.name === it.name && (s.gradeId ?? null) === gid)) {
+      store.addSubject(it.name, { ...it, gradeId: gid })
+      added++
     }
-  } else if (importTab.value === 'subjects') {
-    for (const it of items) if (!store.project.subjects.some((s) => s.name === it.name)) store.addSubject(it.name, it)
-  } else if (importTab.value === 'assignments') {
-    for (const it of items) store.addAssignment(it.classId, it.subjectId, it.teacherId, it.periods)
   }
-  store.notify(`已导入 ${items.length} 条数据`, 'ok')
+  store.notify(`已导入 ${added} 条数据`, 'ok')
   importTab.value = ''
   importText.value = ''
   importReport.value = null
 }
 
-const importHint = computed(
-  () =>
-    ({
-      teachers: '每行一位教师姓名',
-      classes: '每行一个班级，可为「年级<Tab>班级」两列',
-      subjects: '每行「科目[<Tab>周课时]」，主科/体育/连堂按名称自动识别，可再手动调整',
-      assignments: '每行「班级<Tab>科目<Tab>教师[<Tab>周课时]」，名称需与列表一致',
-    }[importTab.value] ?? '')
-)
-const importPlaceholder = computed(
-  () =>
-    ({
-      teachers: '王老师\n李老师\n张老师',
-      classes: '七年级\t七（1）班\n七年级\t七（2）班',
-      subjects: '语文\t5\n数学\t5\n体育\t3',
-      assignments: '七（1）班\t语文\t王老师\t5\n七（1）班\t数学\t张老师\t5',
-    }[importTab.value] ?? '')
-)
+const importHint = '每行「科目[<Tab>周课时][<Tab>年级]」，主科/体育/连堂按名称自动识别，可再手动调整'
+const importPlaceholder = '语文\t5\t七年级\n数学\t5\t七年级\n体育\t3'
 </script>
 
 <template>
   <section class="page">
     <header class="page__head">
-      <h2 class="page__title">科目与教学任务</h2>
+      <h2 class="page__title">科目</h2>
       <p class="page__desc">
-        科目定义属性（主科优先上午黄金时段、体育避开饭点、连堂科目两节连排）；
-        教学任务指明「哪个班、哪门课、哪位老师、每周几节」。
+        定义科目属性：主科优先上午黄金时段、体育避开饭点、连堂科目两节连排。
+        具体排哪个班由「教学任务」页登记。
       </p>
     </header>
 
@@ -135,6 +95,15 @@ const importPlaceholder = computed(
           placeholder="科目名称，如：语文"
           @keyup.enter="addSubject"
         />
+        <div class="grade-check">
+          <label v-for="g in store.project.grades" :key="g.id" class="grade-check__item">
+            <input type="checkbox" :value="g.id" v-model="newSubjectSelectedGrades" />
+            {{ g.name }}
+          </label>
+          <span class="grade-check__hint">
+            {{ newSubjectSelectedGrades.length ? `勾选了 ${newSubjectSelectedGrades.length} 个年级，保存后自动拆分为多条` : '（不勾选 = 适用所有年级）' }}
+          </span>
+        </div>
         <button class="btn btn--primary" @click="addSubject">＋ 科目</button>
       </div>
 
@@ -158,9 +127,11 @@ const importPlaceholder = computed(
           <tr>
             <th>科目</th>
             <th>默认周课时</th>
+            <th>年级</th>
             <th>主科</th>
             <th>体育</th>
             <th>连堂</th>
+            <th title="勾选后，该科目同一时段全校只能安排一个班（适用于共用的机房、音乐室、操场等）">共享教室</th>
             <th></th>
           </tr>
         </thead>
@@ -183,9 +154,16 @@ const importPlaceholder = computed(
                 @change="store.updateSubject(s.id, { weekly: Math.max(0, Math.round(Number($event.target.value) || 0)) })"
               />
             </td>
+            <td>
+              <select class="input select" :value="s.gradeId ?? ''" @change="store.updateSubject(s.id, { gradeId: $event.target.value || null })">
+                <option value="">（所有年级）</option>
+                <option v-for="g in store.project.grades" :key="g.id" :value="g.id">{{ g.name }}</option>
+              </select>
+            </td>
             <td><input type="checkbox" :checked="s.isMajor" @change="store.updateSubject(s.id, { isMajor: $event.target.checked })" /></td>
             <td><input type="checkbox" :checked="s.isPe" @change="store.updateSubject(s.id, { isPe: $event.target.checked })" /></td>
             <td><input type="checkbox" :checked="s.double" @change="store.updateSubject(s.id, { double: $event.target.checked })" /></td>
+            <td><input type="checkbox" :checked="s.roomShared" @change="store.updateSubject(s.id, { roomShared: $event.target.checked })" /></td>
             <td class="cell-danger">
               <button class="btn btn--icon" title="删除科目" @click="removeSubject(s)">✕</button>
             </td>
@@ -193,102 +171,6 @@ const importPlaceholder = computed(
         </tbody>
       </table>
       <div v-else class="empty">还没有科目</div>
-    </div>
-
-    <div class="card">
-      <div class="card__toolbar">
-        <div class="card__title">教学任务（{{ store.project.assignments.length }}）</div>
-        <div class="toolbar-btns">
-          <button class="btn" @click="openImport('assignments')">粘贴导入</button>
-          <button class="btn btn--primary" @click="addAssignment">＋ 任务</button>
-        </div>
-      </div>
-
-      <div v-if="importTab === 'assignments'" class="import-box">
-        <div class="import-box__hint">{{ importHint }}</div>
-        <textarea v-model="importText" class="textarea" rows="6" :placeholder="importPlaceholder"></textarea>
-        <div class="import-box__actions">
-          <button class="btn" @click="runImport">解析</button>
-          <button
-            v-if="importReport && importReport.items.length"
-            class="btn btn--primary"
-            @click="applyImport"
-          >
-            导入 {{ importReport.items.length }} 条
-          </button>
-        </div>
-      </div>
-
-      <table v-if="store.project.assignments.length" class="table">
-        <thead>
-          <tr>
-            <th>班级</th>
-            <th>科目</th>
-            <th>教师</th>
-            <th>周课时</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="a in store.project.assignments" :key="a.id">
-            <td>
-              <select class="input select" :value="a.classId" @change="store.updateAssignment(a.id, { classId: $event.target.value })">
-                <option v-for="c in store.project.classes" :key="c.id" :value="c.id">{{ c.name }}</option>
-              </select>
-            </td>
-            <td>
-              <select class="input select" :value="a.subjectId" @change="store.updateAssignment(a.id, { subjectId: $event.target.value })">
-                <option v-for="s in store.project.subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
-              </select>
-            </td>
-            <td>
-              <select class="input select" :value="a.teacherId" @change="store.updateAssignment(a.id, { teacherId: $event.target.value })">
-                <option v-for="t in store.project.teachers" :key="t.id" :value="t.id">{{ t.name }}</option>
-              </select>
-            </td>
-            <td>
-              <input
-                type="number"
-                class="input num"
-                min="1"
-                max="20"
-                :value="a.periods"
-                @change="store.updateAssignment(a.id, { periods: Math.max(1, Math.round(Number($event.target.value) || 1)) })"
-              />
-              <span v-if="warnOf(a)" class="warn-text">{{ warnOf(a) }}</span>
-            </td>
-            <td class="cell-danger">
-              <button class="btn btn--icon" title="删除任务" @click="removeAssignment(a)">✕</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <div v-else class="empty">还没有教学任务</div>
-    </div>
-
-    <div class="card">
-      <div class="card__title">更多批量导入</div>
-      <div class="more-import">
-        <button class="btn" @click="openImport('teachers')">教师名单</button>
-        <button class="btn" @click="openImport('classes')">班级名单</button>
-        <span v-if="importTab === 'teachers' || importTab === 'classes'" class="more-import__panel">
-          <span class="import-box__hint">{{ importHint }}</span>
-          <textarea v-model="importText" class="textarea" rows="4" :placeholder="importPlaceholder"></textarea>
-          <span class="import-box__actions">
-            <button class="btn" @click="runImport">解析</button>
-            <button
-              v-if="importReport && importReport.items.length"
-              class="btn btn--primary"
-              @click="applyImport"
-            >
-              导入 {{ importReport.items.length }} 条
-            </button>
-          </span>
-        </span>
-      </div>
-      <div v-if="importReport && importReport.errors.length" class="import-errors">
-        <div v-for="(e, i) in importReport.errors" :key="i" class="import-errors__item">⚠ {{ e }}</div>
-      </div>
     </div>
   </section>
 </template>
@@ -323,6 +205,29 @@ const importPlaceholder = computed(
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.grade-check {
+  display: flex;
+  align-items: center;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  padding: 4px 10px;
+  border: 1px dashed var(--c-border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--c-text);
+}
+.grade-check__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.grade-check__item input { accent-color: var(--c-primary); cursor: pointer; }
+.grade-check__hint {
+  font-size: 12px;
+  color: var(--c-text-muted);
 }
 .table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .table th, .table td {
@@ -372,15 +277,6 @@ const importPlaceholder = computed(
   background: var(--c-surface);
 }
 .textarea:focus { border-color: var(--c-primary); }
-.more-import { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
-.more-import__panel {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  background: var(--c-bg);
-  border-radius: 8px;
-  padding: 12px;
-}
 .import-errors { margin-top: 10px; }
 .import-errors__item { font-size: 12.5px; color: #b45309; margin-top: 4px; }
 </style>

@@ -3,10 +3,15 @@
  * 与求解器共用同一套硬约束语义（H1/H2/H4/H5/H7）。
  * 占用结构：班级×槽位、教师×槽位 两张映射（不同班级不同教师的课可并行于同一槽位）。
  */
-import { slotCount, slotsPerDay, unitSizeOf, unitCountOf } from './model.js'
+import { slotCount, slotsPerDay, unitSizeOf, unitCountOf, DEFAULT_RULES, SESSION_PM } from './model.js'
 
 function no(reason) {
   return { ok: false, reason }
+}
+
+/** 合并后的规则开关（旧方案缺字段时取默认值） */
+export function rulesOf(project) {
+  return { ...DEFAULT_RULES, ...(project.rules ?? {}) }
 }
 
 /**
@@ -58,6 +63,11 @@ export function canPlaceUnit(project, assignmentId, targetSlot, maps, { ignoreSi
     if (size === 2 && project.periods[p].session !== project.periods[p + 1].session) {
       return no('连堂需同半天内相邻两节')
     }
+  }
+  // 规则：体育只排下午（早晨/上午/晚上不排体育）
+  const rules = rulesOf(project)
+  if (rules.pePmOnly && subj.isPe && project.periods[p].session !== SESSION_PM) {
+    return no('体育只排在下午（可在「排课规则」中调整）')
   }
   maps ??= buildSlotMaps(project)
   const teacherUnavailable = new Set(
@@ -116,8 +126,14 @@ export function swapUnits(project, aId, aUnit, bId, bUnit) {
   if (!checkA.ok || !checkB.ok) return checkA.ok ? checkB : checkA
 
   const sorted = (xs) => [...xs].sort((x, y) => x - y)
-  project.schedule[aId] = sorted(arrA.map((v, i) => (i === aUnit ? slotB : v)))
-  project.schedule[bId] = sorted(arrB.map((v, i) => (i === bUnit ? slotA : v)))
+  const swapOne = (arr, fromIdx, toSlot) => sorted(arr.map((v, i) => (i === fromIdx ? toSlot : v)))
+  if (aId === bId) {
+    // 同一任务内交换两个单元：一次映射同时替换两处
+    project.schedule[aId] = sorted(arrA.map((v, i) => (i === aUnit ? slotB : i === bUnit ? slotA : v)))
+  } else {
+    project.schedule[aId] = swapOne(arrA, aUnit, slotB)
+    project.schedule[bId] = swapOne(arrB, bUnit, slotA)
+  }
   return { ok: true, reason: '' }
 }
 
@@ -125,6 +141,37 @@ export function swapUnits(project, aId, aUnit, bId, bUnit) {
 export function removeUnit(project, assignmentId, unitIndex) {
   const arr = project.schedule[assignmentId]
   if (arr && unitIndex >= 0 && unitIndex < arr.length) arr.splice(unitIndex, 1)
+}
+
+/**
+ * 强制交换两个单元（忽略约束校验，前提是节数相同）。
+ * 仅用于用户确认「明知冲突仍要交换」的场景；交换后可能产生硬约束冲突，由完整性检查兜底提示。
+ */
+export function forceSwapUnits(project, aId, aUnit, bId, bUnit) {
+  const a = project.assignments.find((x) => x.id === aId)
+  const b = project.assignments.find((x) => x.id === bId)
+  if (!a || !b) return no('任务不存在')
+  const subjA = project.subjects.find((s) => s.id === a.subjectId)
+  const subjB = project.subjects.find((s) => s.id === b.subjectId)
+  const sizeA = unitSizeOf(subjA)
+  const sizeB = unitSizeOf(subjB)
+  if (sizeA !== sizeB) return no('连堂与单节课程无法直接互换')
+
+  const arrA = project.schedule[aId] ?? []
+  const arrB = project.schedule[bId] ?? []
+  const slotA = arrA[aUnit]
+  const slotB = arrB[bUnit]
+  if (slotA === undefined || slotB === undefined) return no('单元不存在')
+
+  const sorted = (xs) => [...xs].sort((x, y) => x - y)
+  const swapOne = (arr, fromIdx, toSlot) => sorted(arr.map((v, i) => (i === fromIdx ? toSlot : v)))
+  if (aId === bId) {
+    project.schedule[aId] = sorted(arrA.map((v, i) => (i === aUnit ? slotB : i === bUnit ? slotA : v)))
+  } else {
+    project.schedule[aId] = swapOne(arrA, aUnit, slotB)
+    project.schedule[bId] = swapOne(arrB, bUnit, slotA)
+  }
+  return { ok: true, reason: '' }
 }
 
 /** 任务已排节数（schedule 中单元数 × 单元节数） */
