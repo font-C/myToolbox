@@ -99,6 +99,11 @@ jobs:
             echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="
           } >> "$GITHUB_ENV"
 
+      # 缓存恢复的 target 里残留历史版本 bundle 产物，tauri-action 按 glob 收集会带上旧包，先清掉
+      - name: Clean stale bundle artifacts
+        shell: bash
+        run: rm -rf src-tauri/target/release/bundle
+
       - name: Build & bundle ${{ matrix.os }}
         uses: tauri-apps/tauri-action@v0
         env:

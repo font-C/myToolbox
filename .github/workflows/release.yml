@@ -131,6 +131,10 @@ jobs:
           TAURI_BUNDLES: ${{ matrix.bundles }}
         run: |
           cd src-tauri
+          # 缓存恢复的 target 里残留历史版本的 bundle 产物（bundle/dmg|nsis|macos 及 dist/），
+          # bundler 只覆盖同名文件、收集步骤又是按 glob 拷贝——不清理会把旧版本安装包
+          # 一并带进发布资产（v0.4.3 污染事故）。打包前整目录清掉。
+          rm -rf target/release/bundle
           npm run tauri build
 
       - name: Collect & upload artifacts
@@ -138,6 +142,8 @@ jobs:
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           cd src-tauri/target/release/bundle
+          # 只收集当次构建：dist 目录从零开始（兜底，正常情况上一步已清）
+          rm -rf dist
           mkdir -p dist
           # macOS: 仅 dmg 安装包
           [ -d dmg ]  && cp -r dmg/*.dmg dist/ 2>/dev/null || true
@@ -226,34 +232,37 @@ jobs:
           echo "${BODY}"
 
           # 3) 查/建 Release（说明同步写入）
+          # 注意：404 时 JSON.parse().id 是 undefined，直接打印会得到字符串 "undefined"，
+          # 令 REL_ID 非空走错「复用」分支 → Release 从未创建且后续全部静默 404（v0.4.3 事故）。
+          # 因此这里必须判空后再打印；创建/上传 curl 带 -f，失败立即响亮报错。
           jq -n --arg tag "${TAG}" --arg body "${BODY}" \
             '{tag_name:$tag, name:("工具箱 "+$tag), body:$body, draft:false, prerelease:false}' > /tmp/payload.json
           REL_JSON=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/tags/${TAG}" || true)
-          REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).id)}catch(e){}})")
+          REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).id;if(v!=null)console.log(v)}catch(e){}})")
 
           if [[ -z "${REL_ID:-}" ]]; then
-            REL_JSON=$(curl -sL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            REL_JSON=$(curl -sfL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               -d @/tmp/payload.json "${API}/releases")
-            REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")
+            REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const v=JSON.parse(s).id;if(v!=null)console.log(v)})")
             echo "创建 ${TAG} Release id=${REL_ID}"
           else
             echo "复用 ${TAG} Release id=${REL_ID}"
-            curl -sL -X PATCH -H "Authorization: Bearer ${GH_TOKEN}" \
+            curl -sfL -X PATCH -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               -d @/tmp/payload.json "${API}/releases/${REL_ID}" >/dev/null
           fi
 
           # 4) 清旧 assets
           for A in $(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/${REL_ID}" \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>JSON.parse(s).assets.forEach(a=>console.log(a.id)))"); do
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{JSON.parse(s).assets.forEach(a=>console.log(a.id))}catch(e){}})"); do
             curl -sL -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/assets/${A}" >/dev/null
           done
 
           # 5) 上传
           for F in dist/*; do
             echo "⬆️  $(basename "$F")"
-            curl -sL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            curl -sfL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Content-Type: application/octet-stream" \
               --data-binary "@${F}" \
               "${API}/releases/${REL_ID}/assets?name=$(basename "${F}")" >/dev/null
@@ -269,7 +278,7 @@ jobs:
             --notes-file /tmp/release-notes.txt \
             --dist dist --out dist/app-update.json
           echo "⬆️  app-update.json"
-          curl -sL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+          curl -sfL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Content-Type: application/octet-stream" \
             --data-binary "@dist/app-update.json" \
             "${API}/releases/${REL_ID}/assets?name=app-update.json" >/dev/null
@@ -301,10 +310,10 @@ jobs:
 
           # 2) 查/建 latest Release
           REL_JSON=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/tags/${TAG}" || true)
-          REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).id)}catch(e){}})")
+          REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).id;if(v!=null)console.log(v)}catch(e){}})")
 
           if [[ -z "${REL_ID:-}" ]]; then
-            REL_JSON=$(curl -sL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            REL_JSON=$(curl -sfL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               -d "{
                 \"tag_name\":\"${TAG}\",
@@ -312,12 +321,12 @@ jobs:
                 \"body\":\"自动滚动更新。当前版本 **v${VERSION}**。\n\n⚠️ 此 tag 每次 push main 都会覆盖更新，只保留最新构建。需要稳定下载请使用带版本号的 Release (vX.Y.Z)。\",
                 \"draft\":false,\"prerelease\":true
               }" "${API}/releases")
-            REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")
+            REL_ID=$(echo "$REL_JSON" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const v=JSON.parse(s).id;if(v!=null)console.log(v)})")
             echo "创建 latest Release id=${REL_ID}"
           else
             echo "复用 latest Release id=${REL_ID}"
             # 更新 body 反映当前版本
-            curl -sL -X PATCH -H "Authorization: Bearer ${GH_TOKEN}" \
+            curl -sfL -X PATCH -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               -d "{\"name\":\"latest (v${VERSION})\",\"body\":\"自动滚动更新。当前版本 **v${VERSION}**。\"}" \
               "${API}/releases/${REL_ID}" >/dev/null
@@ -325,14 +334,14 @@ jobs:
 
           # 3) 清旧 assets → 这就是"原来 releases 里面的改为对应版本"（latest 覆盖更新，版本化 Release 不受影响）
           for A in $(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/${REL_ID}" \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>JSON.parse(s).assets.forEach(a=>console.log(a.id)))"); do
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{JSON.parse(s).assets.forEach(a=>console.log(a.id))}catch(e){}})"); do
             curl -sL -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" "${API}/releases/assets/${A}" >/dev/null
           done
 
           # 4) 上传
           for F in dist/*; do
             echo "⬆️  $(basename "$F")"
-            curl -sL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            curl -sfL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Content-Type: application/octet-stream" \
               --data-binary "@${F}" \
               "${API}/releases/${REL_ID}/assets?name=$(basename "${F}")" >/dev/null
@@ -389,7 +398,7 @@ jobs:
 
           # 已有同名 Release → 删除重建（附件随之重传）
           OLD_ID=$(curl -s -H "Authorization: Bearer ${GITEE_TOKEN}" "${GAPI}/releases/tags/${TAG}" \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).id)}catch(e){}})")
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).id;if(v!=null)console.log(v)}catch(e){}})")
           if [ -n "${OLD_ID:-}" ]; then
             echo "删除旧 Gitee Release id=${OLD_ID}"
             curl -s -X DELETE -H "Authorization: Bearer ${GITEE_TOKEN}" "${GAPI}/releases/${OLD_ID}" >/dev/null || true
@@ -399,18 +408,19 @@ jobs:
           # 创建 Release（Gitee 要求 target_commitish）
           jq -n --arg tag "${TAG}" --arg body "${BODY}" \
             '{tag_name:$tag, name:("工具箱 "+$tag), body:$body, target_commitish:"master", prerelease:false}' > /tmp/gitee-payload.json
-          REL_ID=$(curl -s -X POST -H "Authorization: Bearer ${GITEE_TOKEN}" \
+          REL_ID=$(curl -sf -X POST -H "Authorization: Bearer ${GITEE_TOKEN}" \
             -H "Content-Type: application/json" -d @/tmp/gitee-payload.json \
             "${GAPI}/releases" \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).id)}catch(e){}})")
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const v=JSON.parse(s).id;if(v!=null)console.log(v)}catch(e){}})")
           [ -n "${REL_ID:-}" ] || { echo "❌ Gitee Release 创建失败"; exit 1; }
           echo "Gitee Release id=${REL_ID}"
 
           # 只同步安装包与自动更新载体（dmg/exe/app.tar.gz）；.sig 不需要（签名在更新目录 JSON 里）
+          # 上传 curl 带 -f：附件上传失败必须让任务响亮失败，不得静默缺件
           for F in dist/*.dmg dist/*.exe dist/*.app.tar.gz; do
             [ -e "$F" ] || continue
             echo "⬆️  $(basename "$F")"
-            curl -s -X POST -H "Authorization: Bearer ${GITEE_TOKEN}" \
+            curl -sf -X POST -H "Authorization: Bearer ${GITEE_TOKEN}" \
               -F "file=@${F}" "${GAPI}/releases/${REL_ID}/attach_files" >/dev/null
           done
           echo "✅ https://gitee.com/${GREPO}/releases/tag/${TAG}"
