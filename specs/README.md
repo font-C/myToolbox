@@ -14,6 +14,7 @@
 | [04-packaging-signing.md](./04-packaging-signing.md) | .tbox 打包、哈希与签名 | 打包发布前 |
 | [05-dev-guide.md](./05-dev-guide.md) | 开发、调试、上架全流程 | 新手从这开始 |
 | [06-store-publish.md](./06-store-publish.md) | 商店索引契约与双源发布 | 维护商店时 |
+| [07-app-update.md](./07-app-update.md) | 主程序自动更新：更新目录与发布管线 | 发版/维护更新源时 |
 
 ## 二、一分钟了解
 

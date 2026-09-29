@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "默认能力：允许核心能力与对话框（保存文件）。",
+  "description": "默认能力：允许核心能力、对话框（保存文件）与应用更新（specs/07）。",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": ["core:default", "dialog:default", "updater:default"]
 }

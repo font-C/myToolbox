@@ -7,9 +7,11 @@ import ManagePage from './views/ManagePage.vue'
 import SettingsPage from './views/SettingsPage.vue'
 import { useAppStore } from './stores/app'
 import { useStore } from './composables/useStore'
+import { useAppUpdater } from './composables/useAppUpdater'
 
 const appStore = useAppStore()
 const store = useStore()
+const appUpdater = useAppUpdater()
 
 const tabs = [
   { key: 'home', label: '启动台' },
@@ -27,6 +29,8 @@ onMounted(async () => {
   await appStore.init()
   // 静默检查插件更新（供商店页与红点使用，失败不打扰）
   store.checkUpdatesSilently()
+  // 静默检查主程序更新（供设置页与红点使用，失败不打扰）
+  appUpdater.checkAppUpdate({ silent: true })
   // 插件变化（安装/卸载/启停/开发注册）后刷新列表
   unlisten = await listen('toolbox://plugins-changed', () => {
     appStore.loadPlugins().then(() => store.computeUpdates())
@@ -50,6 +54,10 @@ onBeforeUnmount(() => unlisten?.())
         >
           {{ t.label }}
           <span v-if="t.key === 'store' && store.updates.value.length" class="app__dot"></span>
+          <span
+            v-if="t.key === 'settings' && (appUpdater.status.value === 'available' || appUpdater.status.value === 'ready')"
+            class="app__dot"
+          ></span>
         </button>
       </nav>
     </header>

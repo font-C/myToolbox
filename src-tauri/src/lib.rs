@@ -1,3 +1,4 @@
+mod app_updater;
 mod broker;
 mod pdfops;
 mod plugin_installer;
@@ -13,6 +14,8 @@ use tauri::WindowEvent;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // 主程序自动更新（specs/07）：更新目录静态托管 + minisign 验签
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // 拖拽授权表：窗口事件（拖放/销毁）与 broker 命令都会访问，必须先于任何窗口注册
         .manage(broker::GrantState::default())
         .register_uri_scheme_protocol("plugin", |ctx, request| {
@@ -41,6 +44,8 @@ pub fn run() {
             plugin_installer::plugin_uninstall,
             // 商店资源拉取（Rust 端 HTTP，绕开 webview CORS）
             store_http::store_fetch,
+            // 主程序自动更新
+            app_updater::app_restart,
         ])
         .setup(|app| {
             // 插件注册表与开发插件表

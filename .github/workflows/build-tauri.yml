@@ -77,6 +77,28 @@ jobs:
           cp bin/pdfium.dll src-tauri/pdfium.dll
           ls -la src-tauri/pdfium.dll
 
+      # 主程序自动更新（specs/07）：tauri.conf.json 已开启 createUpdaterArtifacts，
+      # 构建即需 updater 签名私钥（与 release.yml 同一 secret）。
+      # 构建签名只认 TAURI_SIGNING_PRIVATE_KEY（密钥内容，单行 base64）；
+      # 空密码密钥也要显式置空密码变量，否则 CLI 会尝试交互式提示（CI 无 tty 直接失败）。
+      - name: Resolve updater signing key
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "✗ 缺少 secret TAURI_SIGNING_PRIVATE_KEY"
+            echo "  生成：npm run tauri signer generate -- -w .secrets/updater-signing.key"
+            echo "  配置见 specs/07-app-update.md「一次性配置」"
+            exit 1
+          fi
+          # 剥离空白：secret 粘贴若带换行会破坏 GITHUB_ENV 的行格式
+          KEY_B64="$(printf '%s' "$KEY" | tr -d '[:space:]')"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY=$KEY_B64"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="
+          } >> "$GITHUB_ENV"
+
       - name: Build & bundle ${{ matrix.os }}
         uses: tauri-apps/tauri-action@v0
         env:

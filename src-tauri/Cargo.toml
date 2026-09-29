@@ -15,6 +15,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# 主程序自动更新（specs/07）：更新目录 app-update.json 静态托管，安装包 minisign 验签
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 插件内核：.tbox 解包、校验、验签

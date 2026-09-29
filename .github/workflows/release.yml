@@ -105,6 +105,27 @@ jobs:
           Copy-Item bin/pdfium.dll src-tauri/pdfium.dll
           Get-Item src-tauri/pdfium.dll | Select-Object Name,Length
 
+      # 主程序自动更新（specs/07）：createUpdaterArtifacts 已开启，构建即需签名私钥。
+      # 构建签名只认 TAURI_SIGNING_PRIVATE_KEY（密钥内容，单行 base64）；
+      # 空密码密钥也要显式置空密码变量，否则 CLI 会尝试交互式提示（CI 无 tty 直接失败）。
+      - name: Resolve updater signing key
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "✗ 缺少 secret TAURI_SIGNING_PRIVATE_KEY"
+            echo "  生成：npm run tauri signer generate -- -w .secrets/updater-signing.key"
+            echo "  配置见 specs/07-app-update.md「一次性配置」"
+            exit 1
+          fi
+          # 剥离空白：secret 粘贴若带换行会破坏 GITHUB_ENV 的行格式
+          KEY_B64="$(printf '%s' "$KEY" | tr -d '[:space:]')"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY=$KEY_B64"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="
+          } >> "$GITHUB_ENV"
+
       - name: Build & bundle
         env:
           TAURI_BUNDLES: ${{ matrix.bundles }}
@@ -115,12 +136,25 @@ jobs:
       - name: Collect & upload artifacts
         shell: bash
         run: |
+          VERSION="$(node -p "require('./package.json').version")"
           cd src-tauri/target/release/bundle
           mkdir -p dist
           # macOS: 仅 dmg 安装包
           [ -d dmg ]  && cp -r dmg/*.dmg dist/ 2>/dev/null || true
           # Windows: 仅 nsis 安装包
           [ -d nsis ] && cp -r nsis/*.exe dist/ 2>/dev/null || true
+          # 自动更新产物（specs/07）：macOS 更新载体 .app.tar.gz 与两平台 .sig 签名
+          # macOS bundler 产物名不含架构（MyToolbox.app.tar.gz），补「版本+架构」后缀
+          # 供更新目录映射平台键；仅改文件名不改字节，minisign 签名仍然有效
+          if compgen -G "macos/*.app.tar.gz" > /dev/null; then
+            ARCH="$(uname -m | sed 's/arm64/aarch64/')"
+            for F in macos/*.app.tar.gz; do
+              BASE="$(basename "$F" .app.tar.gz)"
+              cp "$F" "dist/${BASE}_${VERSION}_${ARCH}.app.tar.gz"
+              cp "${F}.sig" "dist/${BASE}_${VERSION}_${ARCH}.app.tar.gz.sig"
+            done
+          fi
+          [ -d nsis ] && cp nsis/*.exe.sig dist/ 2>/dev/null || true
           ls -lh dist/
         id: collect
       - uses: actions/upload-artifact@v4
@@ -226,7 +260,21 @@ jobs:
           done
           echo "✅ https://github.com/${REPO}/releases/tag/${TAG}"
 
-          # 6) 传给 gitee-release job
+          # 6) 生成并上传主程序更新目录（specs/07）：tauri updater 端点文件，
+          #    store.yml 会从最新稳定版 Release 取它并随商店发布到 Pages / Gitee 镜像
+          printf '%s\n' "${BODY}" > /tmp/release-notes.txt
+          node scripts/gen-update-catalog.mjs \
+            --version "${VERSION}" \
+            --base-url "https://github.com/${REPO}/releases/download/${TAG}/" \
+            --notes-file /tmp/release-notes.txt \
+            --dist dist --out dist/app-update.json
+          echo "⬆️  app-update.json"
+          curl -sL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@dist/app-update.json" \
+            "${API}/releases/${REL_ID}/assets?name=app-update.json" >/dev/null
+
+          # 7) 传给 gitee-release job
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           {
             echo "body<<RELEASE_BODY_EOF"
@@ -358,11 +406,31 @@ jobs:
           [ -n "${REL_ID:-}" ] || { echo "❌ Gitee Release 创建失败"; exit 1; }
           echo "Gitee Release id=${REL_ID}"
 
-          # 只同步 mac/windows 安装包（dmg/exe），其余文件不同步
-          for F in dist/*.dmg dist/*.exe; do
+          # 只同步安装包与自动更新载体（dmg/exe/app.tar.gz）；.sig 不需要（签名在更新目录 JSON 里）
+          for F in dist/*.dmg dist/*.exe dist/*.app.tar.gz; do
             [ -e "$F" ] || continue
             echo "⬆️  $(basename "$F")"
             curl -s -X POST -H "Authorization: Bearer ${GITEE_TOKEN}" \
               -F "file=@${F}" "${GAPI}/releases/${REL_ID}/attach_files" >/dev/null
           done
           echo "✅ https://gitee.com/${GREPO}/releases/tag/${TAG}"
+
+  # —— 发布成功后同步商店（app-update.json 更新目录随商店发布到 Pages / Gitee）——
+  # store.yml 负责从最新稳定版 Release 取更新目录并入 store/，
+  # 触发放流水线末尾：等 GitHub Release 与 Gitee Release 的安装包都就位后再同步。
+  trigger-store-sync:
+    needs: [decide, release, gitee-release]
+    if: >-
+      always() &&
+      needs.decide.outputs.kind == 'version' &&
+      needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger store.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run store.yml --repo "${{ github.repository }}" --ref master
+          echo "✓ 已触发 store.yml：更新目录将发布到 Pages 主源与 Gitee 镜像"

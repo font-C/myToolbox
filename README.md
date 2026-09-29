@@ -1,7 +1,7 @@
 # MyToolbox · 插件化本地工具箱
 
 Tauri 2 + Vue 3 的桌面工具箱。**壳子极小**：启动台、插件商店、插件管理与设置；
-所有工具（含内置的三个）都是符合规范的 **.tbox 插件**，运行在独立的原生窗口里。
+所有工具（含内置的五个 PDF 工具）都是符合规范的 **.tbox 插件**，运行在独立的原生窗口里。
 
 ## 架构
 
@@ -10,17 +10,17 @@ Tauri 2 + Vue 3 的桌面工具箱。**壳子极小**：启动台、插件商店
   ├─ 启动台：已装插件网格 → plugin:// 协议打开独立插件窗口
   ├─ 商店：静态索引（GitHub Pages 主源 + Gitee 镜像）→ 下载 → 验签 → 安装
   ├─ 插件管理：启停 / 卸载 / 本地导入 .tbox / 开发插件目录直载
-  └─ 设置：启动行为（启动台 / 指定插件）
+  └─ 设置：启动行为（启动台 / 指定插件）、应用更新（检查 / 下载安装 / 重启）
 
 Rust 插件内核（src-tauri）
   ├─ plugin:// 自定义协议：MIME / 路径穿越防护 / 插件页严格 CSP
   ├─ 权限代理 broker：文件对话框、会话授权路径读写、打印
   ├─ 安装器：.tbox 解包、sha256 校验、Ed25519 验签、原子落盘
-  └─ 内置插件：三个工具编译期嵌入，启动时确保安装/升级
+  └─ 内置插件：五个 PDF 工具编译期嵌入，启动时确保安装/升级
 ```
 
-内置工具：**PDF 裁剪**（plugins/pdf-crop）、**PDF 拼接**（plugins/pdf-compose）、
-**口算练习**（plugins/mental-math）——它们同时是插件规范的参考实现。
+内置工具：**PDF 裁剪**、**PDF 拼接**、**PDF 拆分**、**PDF 压缩**、**PDF 加解密**
+（plugins/pdf-*）——它们同时是插件规范的参考实现；其余工具请从应用内商店安装。
 
 ## 开发
 
@@ -41,6 +41,13 @@ npm run new-plugin          # 新插件脚手架 → plugins/<id>/
 发布管线 `.github/workflows/store.yml`：tag `v*` 或手动触发 → 构建全部插件 →
 私钥签名（Secret `ED25519_SIGNING_SK`）→ 发布 GitHub Pages + 推送 Gitee 镜像。
 一次性配置见 [specs/06-store-publish.md](./specs/06-store-publish.md)。
+
+## 主程序更新
+
+应用内自动更新（tauri-plugin-updater）：更新目录 `app-update.json` 与商店同源静态托管
+（Pages 主源 + Gitee 镜像），发版时由 `release.yml` 生成并上传，store.yml 随商店发布；
+安装包经 minisign 验签（Secret `TAURI_SIGNING_PRIVATE_KEY`）。契约与一次性配置见
+[specs/07-app-update.md](./specs/07-app-update.md)。
 
 ## 安全模型
 

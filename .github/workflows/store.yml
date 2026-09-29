@@ -84,6 +84,25 @@ jobs:
           TOOLBOX_SIGNING_SK: ${{ secrets.ED25519_SIGNING_SK }}
         run: node scripts/build-store.mjs
 
+      # 主程序更新目录（specs/07）：release.yml 发版时把 app-update.json 传成 Release 资产，
+      # 这里取「最新一个带该资产的稳定版 Release」的目录放入 store/，与插件索引一同发布。
+      # 找不到（如发版功能上线前）则跳过，保留现状。
+      - name: Include app update catalog (app-update.json)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          REL_ID=$(gh api "repos/${REPO}/releases?per_page=30" \
+            --jq '[.[] | select(.draft == false and .prerelease == false)] | map(select(any(.assets[]; .name == "app-update.json"))) | first | .id // empty')
+          if [ -z "${REL_ID}" ]; then
+            echo "ℹ 暂无带 app-update.json 的稳定版 Release，跳过（发版后自动出现）"
+            exit 0
+          fi
+          ASSET_URL=$(gh api "repos/${REPO}/releases/${REL_ID}" \
+            --jq '.assets[] | select(.name == "app-update.json") | .url')
+          gh api --header "Accept: application/octet-stream" "${ASSET_URL}" > store/app-update.json
+          node -e "const j=require('./store/app-update.json');console.log('✓ 已包含更新目录 v'+j.version+'：'+Object.keys(j.platforms).join(', '))"
+
       - name: Upload store artifact
         uses: actions/upload-artifact@v4
         with:
@@ -147,6 +166,22 @@ jobs:
           # 与 GitHub Pages 相同的布局：站点根下 store/ 子目录
           mkdir -p gitee/store
           rsync -a --delete store/ gitee/store/
+          # 更新目录（specs/07）本地化：安装包 URL 改指 Gitee Release 附件
+          # （与 release.yml 的 gitee-release 一致：附件发布在代码镜像仓库 my-toolbox）
+          if [ -f gitee/store/app-update.json ]; then
+            GITEE_OWNER="${GITEE_OWNER}" node -e '
+              const fs = require("fs");
+              const p = "gitee/store/app-update.json";
+              const j = JSON.parse(fs.readFileSync(p, "utf8"));
+              const to = "https://gitee.com/" + process.env.GITEE_OWNER + "/my-toolbox/releases/download/";
+              for (const k of Object.keys(j.platforms || {})) {
+                j.platforms[k].url = j.platforms[k].url.replace(
+                  /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\//, to);
+              }
+              fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+              console.log("✓ 更新目录 URL 已指向 Gitee 镜像");
+            '
+          fi
           # 镜像根说明与跳转页（store/ 之外不参与 --delete，保留人工改动）
           RAW_URL="https://gitee.com/${GITEE_REPO}/raw/master/store/"
           cat > gitee/README.md <<EOT
