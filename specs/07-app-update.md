@@ -73,12 +73,16 @@ Tauri updater 端点格式，位于商店同目录：`store/app-update.json`。
 ## 五、发布管线
 
 release.yml（发版）：
-1. 构建前从 secret `TAURI_SIGNING_PRIVATE_KEY` 注入密钥内容（单行 base64）并显式置空密码变量
-2. 收集产物：安装包 + `*.app.tar.gz(.sig)`（macOS 重命名补 `_<version>_<arch>`）+ `*.exe.sig`
-3. 版本化 Release 上传全部资产后，用 `scripts/gen-update-catalog.mjs` 生成 `app-update.json`
-   一并上传（notes 取 Release 说明；latest 滚动构建不生成目录）
-4. `gitee-release` 同步安装包与 `.app.tar.gz` 到 Gitee Release（`.sig` 不需要）
-5. `trigger-store-sync` 触发 store.yml
+1. 打包前清空 `target/release/bundle`、收集前清空 `dist/`——**Release 资产与 Gitee 附件
+   只含当次构建产物**（actions/cache 恢复的 target 会残留历史版本安装包，不清会把
+   旧版本包一并带进发布资产）；Windows 构建步骤须显式 `shell: bash`
+2. 构建前从 secret `TAURI_SIGNING_PRIVATE_KEY` 注入密钥内容（单行 base64）并显式置空密码变量
+3. 收集产物：安装包 + `*.app.tar.gz(.sig)`（macOS 重命名补 `_<version>_<arch>`）+ `*.exe.sig`
+4. 版本化 Release 用 `gh release` 查/建/上传（上传前显式清空旧资产；不手搓 curl 直传
+   上传端点——302 后请求本体丢失会立即 4xx），资产含 `scripts/gen-update-catalog.mjs`
+   生成的 `app-update.json`（notes 取 Release 说明；latest 滚动构建不生成目录）
+5. `gitee-release` 删除重建 Gitee Release，同步安装包与 `.app.tar.gz`（`.sig` 不需要）
+6. `trigger-store-sync` 触发 store.yml
 
 store.yml（商店发布）：
 1. 取「最新一个带 `app-update.json` 资产的稳定版 Release」的目录放入 `store/`（没有则跳过）
