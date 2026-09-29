@@ -33,6 +33,5 @@ docs/
 .secrets/
 .zcodeignore
 app-icon.png
-specs/
 .zcode/plans/
 .trae/
