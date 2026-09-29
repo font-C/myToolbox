@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { save, open, message } from '@tauri-apps/plugin-dialog'
+import { open, ask } from '@tauri-apps/plugin-dialog'
 import { useAppStore } from '../stores/app'
 
 const appStore = useAppStore()
@@ -40,12 +40,17 @@ async function toggleEnabled(plugin) {
 }
 
 async function uninstall(plugin) {
-  const ok = await message(`确定卸载插件「${plugin.manifest.name}」？此操作会删除其文件。`, {
+  const hint =
+    plugin.source === 'builtin'
+      ? '内置插件卸载后不会随应用启动自动恢复，需要时可从商店重新安装。'
+      : '此操作会删除其文件。'
+  const ok = await ask(`确定卸载插件「${plugin.manifest.name}」？${hint}`, {
     title: '卸载插件',
     kind: 'warning',
-    buttons: ['取消', '卸载'],
+    okLabel: '卸载',
+    cancelLabel: '取消',
   })
-  if (ok !== '卸载') return
+  if (!ok) return
   try {
     await invoke('plugin_uninstall', { id: plugin.id })
     notify('ok', `已卸载 ${plugin.manifest.name}`)
@@ -139,12 +144,7 @@ async function unregisterDev(plugin) {
             >
               移除
             </button>
-            <button
-              v-else-if="p.source !== 'builtin'"
-              type="button"
-              class="btn item__danger"
-              @click="uninstall(p)"
-            >
+            <button v-else type="button" class="btn item__danger" @click="uninstall(p)">
               卸载
             </button>
           </div>

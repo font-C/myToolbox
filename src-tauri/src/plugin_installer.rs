@@ -19,23 +19,13 @@ use crate::plugin_registry::{InstalledPlugin, PluginRegistry};
 pub const STORE_PUBKEY_HEX: &str = "4f5695564fb3004ddf88c9a430f9f014655f59a13e5d9ee5e40cd99c14d8da50";
 
 /// 内置插件（编译期嵌入）。构建流程：npm run build:plugins → src-tauri/builtin/*.tbox。
+/// 内置仅保留 PDF 系工具；其余工具从商店安装（specs/00-overview.md）。
 pub const BUILTIN_PLUGINS: &[(&str, &[u8])] = &[
-    ("mental-math", include_bytes!("../builtin/mental-math.tbox")),
     ("pdf-crop", include_bytes!("../builtin/pdf-crop.tbox")),
     ("pdf-compose", include_bytes!("../builtin/pdf-compose.tbox")),
     ("pdf-split", include_bytes!("../builtin/pdf-split.tbox")),
     ("pdf-compress", include_bytes!("../builtin/pdf-compress.tbox")),
     ("pdf-crypt", include_bytes!("../builtin/pdf-crypt.tbox")),
-    ("qr-tools", include_bytes!("../builtin/qr-tools.tbox")),
-    ("image-compress", include_bytes!("../builtin/image-compress.tbox")),
-    ("daily-calc", include_bytes!("../builtin/daily-calc.tbox")),
-    ("clipboard-history", include_bytes!("../builtin/clipboard-history.tbox")),
-    ("text-tools", include_bytes!("../builtin/text-tools.tbox")),
-    ("password-gen", include_bytes!("../builtin/password-gen.tbox")),
-    ("class-tools", include_bytes!("../builtin/class-tools.tbox")),
-    ("gif-maker", include_bytes!("../builtin/gif-maker.tbox")),
-    ("pic-merge", include_bytes!("../builtin/pic-merge.tbox")),
-    ("course-scheduler", include_bytes!("../builtin/course-scheduler.tbox")),
 ];
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -156,13 +146,14 @@ pub fn install_tbox(
     }
     std::fs::rename(&tmp, &target).map_err(|e| format!("安装插件失败: {e}"))?;
 
-    // 更新注册表（升级保留启用状态）
+    // 更新注册表（升级保留启用状态）；从商店重装会清除内置插件的卸载标记
     let mut inner = registry.0.lock().unwrap();
     let enabled = inner
         .plugins
         .get(&manifest.id)
         .map(|p| p.enabled)
         .unwrap_or(true);
+    inner.uninstalled_builtins.remove(&manifest.id);
     inner.plugins.insert(
         manifest.id.clone(),
         InstalledPlugin {
@@ -183,7 +174,9 @@ pub fn install_tbox(
 
 /// 启动时确保内置插件就位：内置版本比已装版本新（或从未安装）时安装/升级；
 /// 已装版本（含商店/本地来源）更新则保留用户的，不回退。
+/// 已从内置清单移除的旧内置插件（老版本宿主装过的）一并清理。
 pub fn ensure_builtins(app: &AppHandle) {
+    retire_removed_builtins(app);
     for (id, tbox) in BUILTIN_PLUGINS {
         if tbox.is_empty() {
             continue; // 构建占位（插件尚未打包）
@@ -198,11 +191,13 @@ pub fn ensure_builtins(app: &AppHandle) {
         let registry = app.state::<PluginRegistry>();
         let skip = {
             let inner = registry.0.lock().unwrap();
-            inner
+            let user_removed = inner.uninstalled_builtins.contains(*id);
+            let outdated = inner
                 .plugins
                 .get(*id)
                 .map(|existing| !plugin_manifest::version_ge(&builtin_version, &existing.manifest.version))
-                .unwrap_or(false)
+                .unwrap_or(false);
+            user_removed || outdated
         };
         if skip {
             continue;
@@ -214,12 +209,61 @@ pub fn ensure_builtins(app: &AppHandle) {
     }
 }
 
-/// 从 .tbox 中只读 manifest 版本（用于内置升级判断）。
-fn peek_version(tbox: &[u8]) -> Option<String> {
+/// 清理已不在内置清单里的旧内置插件：从注册表移除并删除其文件（商店版不受影响）；
+/// 同时丢弃不再嵌入的卸载标记。有变化时通知前端刷新。
+fn retire_removed_builtins(app: &AppHandle) {
+    let embedded = |id: &str| BUILTIN_PLUGINS.iter().any(|(bid, _)| *bid == id);
+    let registry = app.state::<PluginRegistry>();
+    let mut inner = registry.0.lock().unwrap();
+
+    let stale: Vec<String> = inner
+        .plugins
+        .iter()
+        .filter(|(id, p)| p.source == "builtin" && !embedded(id))
+        .map(|(id, _)| id.clone())
+        .collect();
+    let flags_before = inner.uninstalled_builtins.len();
+    inner.uninstalled_builtins.retain(|id| embedded(id));
+    if stale.is_empty() && inner.uninstalled_builtins.len() == flags_before {
+        return;
+    }
+    if let Some(dir) = &inner.dir {
+        for id in &stale {
+            let target = dir.join(id);
+            if target.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&target) {
+                    log::err(&format!("清理旧内置插件 {id} 文件失败: {e}"));
+                }
+            }
+        }
+    }
+    for id in &stale {
+        inner.plugins.remove(id);
+        log::ok(&format!("已移除旧内置插件 {id}（不再随宿主内置，可从商店安装）"));
+    }
+    crate::plugin_registry::persist(&inner)
+        .unwrap_or_else(|e| log::err(&format!("持久化注册表失败: {e}")));
+    drop(inner);
+    for id in &stale {
+        let label = format!("{}{}", crate::plugin_registry::PLUGIN_LABEL_PREFIX, id);
+        if let Some(w) = app.get_webview_window(&label) {
+            let _ = w.close();
+        }
+    }
+    use tauri::Emitter;
+    let _ = app.emit("toolbox://plugins-changed", ());
+}
+
+/// 从 .tbox 中只读 manifest（用于内置升级判断）。
+fn peek_manifest(tbox: &[u8]) -> Option<PluginManifest> {
     let files = unzip_to_memory(tbox).ok()?;
     let (_, raw) = files.iter().find(|(n, _)| n == "manifest.json")?;
-    let manifest: PluginManifest = serde_json::from_slice(raw).ok()?;
-    Some(manifest.version)
+    serde_json::from_slice(raw).ok()
+}
+
+/// 从 .tbox 中只读 manifest 版本（用于内置升级判断）。
+fn peek_version(tbox: &[u8]) -> Option<String> {
+    peek_manifest(tbox).map(|m| m.version)
 }
 
 /// 简单日志（避免引入 log 依赖）
@@ -288,7 +332,8 @@ pub fn plugin_install(window: WebviewWindow, payload: InstallPayload) -> Result<
     Ok(manifest)
 }
 
-/// 卸载插件（内置插件不可卸载，仅可停用）。
+/// 卸载插件。内置插件同样可卸载：记入「已卸载内置」集合，宿主启动/升级不再
+/// 自动装回；需要时从商店重新安装（安装会自动清除该标记）。
 #[tauri::command]
 pub fn plugin_uninstall(window: WebviewWindow, id: String) -> Result<(), String> {
     ensure_main(&window)?;
@@ -296,12 +341,13 @@ pub fn plugin_uninstall(window: WebviewWindow, id: String) -> Result<(), String>
     let registry = app.state::<PluginRegistry>();
     let mut inner = registry.0.lock().unwrap();
     let entry = inner.plugins.get(&id).ok_or("插件不存在")?;
-    if entry.source == "builtin" {
-        return Err("内置插件不可卸载，可在插件管理中停用".into());
-    }
+    let is_builtin = entry.source == "builtin";
     let dir = inner.dir.clone().ok_or("插件目录未初始化")?;
     let target: &Path = &dir.join(&id);
     inner.plugins.remove(&id);
+    if is_builtin {
+        inner.uninstalled_builtins.insert(id.clone());
+    }
     crate::plugin_registry::persist(&inner)?;
     drop(inner);
 
@@ -334,6 +380,19 @@ mod tests {
     fn unzip_rejects_garbage() {
         assert!(unzip_to_memory(b"not a zip").is_err());
         assert!(unzip_to_memory(b"").is_err());
+    }
+
+    /// 内置包的 manifest 必须能解析且 id 与登记一致（卸载/恢复列表依赖此假设）。
+    #[test]
+    fn builtin_packages_manifest_matches_id() {
+        for (id, tbox) in BUILTIN_PLUGINS {
+            if tbox.is_empty() {
+                continue; // 构建占位
+            }
+            let m = peek_manifest(tbox)
+                .unwrap_or_else(|| panic!("内置插件 {id} 的 manifest 无法解析"));
+            assert_eq!(&m.id, id);
+        }
     }
 
     /// 固化「Node(noble) 签名 ↔ Rust(dalek) 验签」的跨库互操作：

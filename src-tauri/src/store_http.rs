@@ -42,9 +42,11 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_non_https() {
+        // tauri::ipc::Response 未实现 Debug，不能用 unwrap_err
         let err = store_fetch("http://example.com/x".into(), None)
             .await
-            .unwrap_err();
+            .err()
+            .expect("非 https 地址应被拒绝");
         assert!(err.contains("仅允许 https"));
     }
 }

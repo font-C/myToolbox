@@ -1,9 +1,9 @@
 //! 已安装插件注册表：appData/plugins/installed.json 的加载/持久化与查询。
 //! 同时维护开发模式插件表（仅 debug 构建）与插件窗口的打开逻辑。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,8 @@ pub struct InstalledPlugin {
 pub struct RegistryInner {
     pub plugins: HashMap<String, InstalledPlugin>,
     pub dir: Option<PathBuf>,
+    /// 用户显式卸载的内置插件 id：启动/升级不再自动装回，恢复走插件管理页。
+    pub uninstalled_builtins: HashSet<String>,
 }
 
 /// 全局注册表状态（setup 阶段初始化）
@@ -57,22 +59,45 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
         HashMap::new()
     };
 
+    // 已卸载内置清单：损坏时容忍并重置为空（代价只是内置插件被重新装回）
+    let uninstalled_path = plugins_dir.join("uninstalled-builtins.json");
+    let uninstalled_builtins = if uninstalled_path.exists() {
+        fs::read_to_string(&uninstalled_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<HashSet<String>>(&raw).ok())
+            .unwrap_or_else(|| {
+                crate::plugin_installer::log::err("uninstalled-builtins.json 解析失败，已重置为空");
+                HashSet::new()
+            })
+    } else {
+        HashSet::new()
+    };
+
     app.manage(PluginRegistry(Mutex::new(RegistryInner {
         plugins,
         dir: Some(plugins_dir),
+        uninstalled_builtins,
     })));
     app.manage(DevPlugins(Mutex::new(HashMap::new())));
     Ok(())
 }
 
-/// 持久化注册表（原子写）
+/// 持久化注册表与已卸载内置清单（原子写）
 pub fn persist(state: &RegistryInner) -> Result<(), String> {
     let dir = state.dir.as_ref().ok_or("插件目录未初始化")?;
-    let path = dir.join("installed.json");
-    let tmp = dir.join("installed.json.tmp");
     let json = serde_json::to_string_pretty(&state.plugins).map_err(|e| e.to_string())?;
-    fs::write(&tmp, json).map_err(|e| format!("写入 installed.json 失败: {e}"))?;
-    fs::rename(&tmp, &path).map_err(|e| format!("替换 installed.json 失败: {e}"))?;
+    atomic_write(&dir.join("installed.json"), &json)?;
+
+    let uninstalled = serde_json::to_string_pretty(&state.uninstalled_builtins)
+        .map_err(|e| e.to_string())?;
+    atomic_write(&dir.join("uninstalled-builtins.json"), &uninstalled)?;
+    Ok(())
+}
+
+fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, contents).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+    fs::rename(&tmp, path).map_err(|e| format!("替换 {} 失败: {e}", path.display()))?;
     Ok(())
 }
 

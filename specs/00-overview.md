@@ -50,10 +50,12 @@
 
 ## 三、内置插件
 
-`plugins/` 下的三个工具（pdf-crop、pdf-compose、mental-math）本身完全按本规范开发，
-经 `npm run build:plugins` 打包后**编译期嵌入**宿主（include_bytes!），启动时确保安装：
+`plugins/` 下的五个 PDF 工具（pdf-crop、pdf-compose、pdf-split、pdf-compress、pdf-crypt）
+本身完全按本规范开发，经 `npm run build:plugins` 打包后**编译期嵌入**宿主（include_bytes!），
+启动时确保安装；老版本宿主内置的其他工具会在升级后首次启动时自动清理，从商店安装即可继续使用：
 
-- 内置插件不可卸载、可停用；随宿主发版升级
+- 内置插件可停用、可卸载；卸载记入 `uninstalled-builtins.json`，宿主启动/升级
+  不再自动装回，需要时从商店重新安装（安装会自动清除该标记）；未卸载的内置插件随宿主发版升级
 - 用户从商店装了同 id 且版本更新的插件时，保留用户版本（不回退）
 
 ## 四、插件开发者的心智模型
