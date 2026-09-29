@@ -1,6 +1,10 @@
 <script setup>
 import { ref, reactive, computed, onBeforeUnmount, nextTick } from 'vue'
-import { generatePapers } from './mentalMath.js'
+import { generatePapers, validateOptions } from './mentalMath.js'
+import WorksheetTab from './WorksheetTab.vue'
+
+// —— 顶部模式：practice 互动练习 | sheet 题卡打印 ——
+const mode = ref('practice')
 
 // —— 配置状态 ——
 const showConfig = ref(true)
@@ -78,16 +82,9 @@ function toggleOp(code) {
 }
 
 function validateConfig() {
-  if (!config.ops.length) {
-    alert('请至少选择一种运算。')
-    return false
-  }
-  if (config.lo < 0 || config.hi < config.lo) {
-    alert('数字范围不合法：最小值 ≥ 0 且 最大值 ≥ 最小值。')
-    return false
-  }
-  if (config.resultMax < config.resultMin || config.resultMin < 0) {
-    alert('结果范围不合法：最小值 ≥ 0 且 最大值 ≥ 最小值。')
+  const err = validateOptions(config)
+  if (err) {
+    alert(err)
     return false
   }
   return true
@@ -178,8 +175,29 @@ function toConfig() {
 
 <template>
   <div class="math">
+    <nav class="mode-tabs">
+      <button
+        type="button"
+        class="mode-tab"
+        :class="{ 'mode-tab--on': mode === 'practice' }"
+        @click="mode = 'practice'"
+      >
+        口算练习
+      </button>
+      <button
+        type="button"
+        class="mode-tab"
+        :class="{ 'mode-tab--on': mode === 'sheet' }"
+        @click="mode = 'sheet'"
+      >
+        题卡打印
+      </button>
+    </nav>
+
+    <!-- 口算练习（互动答题） -->
+    <template v-if="mode === 'practice'">
     <!-- 配置区 -->
-    <section v-if="showConfig || !fetched" class="config">
+    <section v-if="showConfig || !fetched" class="panel config">
       <h2 class="config__title">口算练习配置</h2>
 
       <div class="config__group">
@@ -277,7 +295,7 @@ function toConfig() {
       </div>
 
       <!-- 全部完成 -->
-      <div v-if="done" class="play__done">
+      <div v-if="done" class="panel play__done">
         <div class="play__done-emoji" v-text="correctCount === papers.length ? '🎉' : '✅'" />
         <h3 class="play__done-title">练习完成</h3>
         <p class="play__done-text">
@@ -290,7 +308,7 @@ function toConfig() {
 
       <!-- 答题中 -->
       <template v-else>
-        <div class="play__card">
+        <div class="panel play__card">
           <div class="play__question">{{ current.text }} = ?</div>
           <form class="play__answer" @submit.prevent="submit">
             <div class="play__answer-field">
@@ -351,6 +369,10 @@ function toConfig() {
         </div>
       </template>
     </section>
+    </template>
+
+    <!-- 口算题卡（生成 + A4 打印） -->
+    <WorksheetTab v-else />
   </div>
 </template>
 
@@ -358,87 +380,48 @@ function toConfig() {
 .math {
   height: 100%;
   overflow: auto;
-  padding: 24px;
+  /* 顶部不留 padding：预览工具栏吸顶时上方不会漏出滚动内容 */
+  padding: 0 24px 24px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+}
+.mode-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  margin: 24px 0 18px;
+}
+.mode-tab {
+  padding: 7px 22px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.mode-tab:hover {
+  color: var(--c-text);
+}
+.mode-tab--on {
+  background: var(--c-primary);
+  color: #fff;
+  font-weight: 600;
+}
+.mode-tab--on:hover {
+  color: #fff;
 }
 .config,
 .play {
   width: 100%;
   max-width: 560px;
-}
-.config {
-  background: var(--c-surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--c-border);
-  box-shadow: var(--shadow);
-  padding: 28px;
-  height: fit-content;
-}
-.config__title {
-  margin: 0 0 20px;
-  font-size: 20px;
-}
-.config__group {
-  margin-bottom: 16px;
-}
-.config__label {
-  display: block;
-  font-size: 13px;
-  color: var(--c-text-muted);
-  margin-bottom: 8px;
-}
-.config__ops {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.config__op {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: 1px solid var(--c-border);
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.15s;
-}
-.config__op--on {
-  border-color: var(--c-primary);
-  color: var(--c-primary);
-  background: rgba(59, 130, 246, 0.08);
-}
-.config__range {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.input {
-  border: 1px solid var(--c-border);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 14px;
-  font-family: inherit;
-  width: 100px;
-  outline: none;
-}
-.input:focus {
-  border-color: var(--c-primary);
-}
-.input--sm {
-  width: 80px;
-}
-.config__switch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 0 20px;
-  font-size: 14px;
-  cursor: pointer;
-}
-.config__submit {
-  width: 100%;
+  margin-top: 24px;
 }
 
 /* 答题 */
@@ -463,10 +446,6 @@ function toConfig() {
   font-size: 13px;
 }
 .play__card {
-  background: var(--c-surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--c-border);
-  box-shadow: var(--shadow);
   padding: 32px;
   text-align: center;
 }
@@ -509,10 +488,6 @@ function toConfig() {
   color: var(--c-danger);
 }
 .play__done {
-  background: var(--c-surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--c-border);
-  box-shadow: var(--shadow);
   padding: 40px;
   text-align: center;
 }

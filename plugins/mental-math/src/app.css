@@ -1,4 +1,81 @@
-/* 口算练习插件级公共样式（组件私有样式在 App.vue 的 scoped 中） */
+/* 口算练习插件级公共样式（练习 / 题卡打印两个模式共用，全局生效） */
 .math {
   height: 100%;
+}
+
+/* 卡片容器：配置面板、答题卡、完成卡共用 */
+.panel {
+  background: var(--c-surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--c-border);
+  box-shadow: var(--shadow);
+  padding: 28px;
+  height: fit-content;
+}
+
+/* —— 表单约定（配置区共用）—— */
+.config__title {
+  margin: 0 0 20px;
+  font-size: 20px;
+}
+.config__group {
+  margin-bottom: 16px;
+}
+.config__label {
+  display: block;
+  font-size: 13px;
+  color: var(--c-text-muted);
+  margin-bottom: 8px;
+}
+.config__ops {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.config__op {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+}
+.config__op--on {
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+  background: rgba(59, 130, 246, 0.08);
+}
+.config__range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.input {
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  width: 100px;
+  outline: none;
+}
+.input:focus {
+  border-color: var(--c-primary);
+}
+.input--sm {
+  width: 80px;
+}
+.config__switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 20px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.config__submit {
+  width: 100%;
 }

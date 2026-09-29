@@ -1,7 +1,7 @@
 {
   "name": "@toolbox/plugin-mental-math",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@toolbox/plugin-sdk": "^1.0.0",
+    "pdf-lib": "^1.17.1",
     "vue": "^3.5.13"
   },
   "devDependencies": {

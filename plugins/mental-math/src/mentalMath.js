@@ -219,6 +219,21 @@ function renderChild(parent, child, parentPrio, isRight) {
 }
 
 /**
+ * 校验生成配置，返回错误文案；合法返回 null。
+ * @param {{ops:string[], lo:number, hi:number, resultMin:number, resultMax:number}} cfg
+ */
+export function validateOptions(cfg) {
+  if (!cfg.ops || !cfg.ops.length) return '请至少选择一种运算。'
+  if (cfg.lo < 0 || cfg.hi < cfg.lo) {
+    return '数字范围不合法：最小值 ≥ 0 且 最大值 ≥ 最小值。'
+  }
+  if (cfg.resultMax < cfg.resultMin || cfg.resultMin < 0) {
+    return '结果范围不合法：最小值 ≥ 0 且 最大值 ≥ 最小值。'
+  }
+  return null
+}
+
+/**
  * 生成一道口算题
  * @param {{ops:string[], lo:number, hi:number, resultMin:number, resultMax:number, mixed:boolean, division?:"exact"|"remainder"}} options
  * @returns {{text:string, answer:number|{quotient:number,remainder:number}, kind:"number"|"pair"}|null}
