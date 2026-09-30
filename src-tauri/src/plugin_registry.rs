@@ -52,7 +52,8 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
 
     let registry_path = plugins_dir.join("installed.json");
     let plugins = if registry_path.exists() {
-        let raw = fs::read_to_string(&registry_path).map_err(|e| format!("读取 installed.json 失败: {e}"))?;
+        let raw = fs::read_to_string(&registry_path)
+            .map_err(|e| format!("读取 installed.json 失败: {e}"))?;
         serde_json::from_str::<HashMap<String, InstalledPlugin>>(&raw)
             .map_err(|e| format!("解析 installed.json 失败: {e}"))?
     } else {
@@ -88,8 +89,8 @@ pub fn persist(state: &RegistryInner) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&state.plugins).map_err(|e| e.to_string())?;
     atomic_write(&dir.join("installed.json"), &json)?;
 
-    let uninstalled = serde_json::to_string_pretty(&state.uninstalled_builtins)
-        .map_err(|e| e.to_string())?;
+    let uninstalled =
+        serde_json::to_string_pretty(&state.uninstalled_builtins).map_err(|e| e.to_string())?;
     atomic_write(&dir.join("uninstalled-builtins.json"), &uninstalled)?;
     Ok(())
 }
@@ -149,14 +150,22 @@ pub struct PluginInfo {
 /// 列出全部可用插件（已安装含停用 + 开发模式），按 id 排序。
 #[tauri::command]
 pub fn plugin_list(app: AppHandle) -> Result<Vec<PluginInfo>, String> {
-    let icon_of = |id: &str, icon: &str| format!("{}/{}", crate::plugin_protocol::asset_base(), format_args!("{id}/{icon}"));
+    let icon_of = |id: &str, icon: &str| {
+        format!(
+            "{}/{}",
+            crate::plugin_protocol::asset_base(),
+            format_args!("{id}/{icon}")
+        )
+    };
     let registry = app.state::<PluginRegistry>();
     let inner = registry.0.lock().unwrap();
     let mut list: Vec<PluginInfo> = inner
         .plugins
         .values()
         .map(|p| PluginInfo {
-            running: app.get_webview_window(&format!("{PLUGIN_LABEL_PREFIX}{}", p.manifest.id)).is_some(),
+            running: app
+                .get_webview_window(&format!("{PLUGIN_LABEL_PREFIX}{}", p.manifest.id))
+                .is_some(),
             icon_url: icon_of(&p.manifest.id, &p.manifest.icon),
             id: p.manifest.id.clone(),
             manifest: p.manifest.clone(),
@@ -176,7 +185,9 @@ pub fn plugin_list(app: AppHandle) -> Result<Vec<PluginInfo>, String> {
                 continue; // 已安装版本优先展示
             }
             list.push(PluginInfo {
-                running: app.get_webview_window(&format!("{PLUGIN_LABEL_PREFIX}{id}")).is_some(),
+                running: app
+                    .get_webview_window(&format!("{PLUGIN_LABEL_PREFIX}{id}"))
+                    .is_some(),
                 icon_url: icon_of(id, &manifest.icon),
                 id: id.clone(),
                 manifest: manifest.clone(),
@@ -193,8 +204,10 @@ pub fn plugin_list(app: AppHandle) -> Result<Vec<PluginInfo>, String> {
 }
 
 /// 打开（或聚焦）插件窗口。
+/// 注意：必须为 async——同步命令在主线程执行，build() 会等待主线程事件循环，
+/// 在 Windows 上直接死锁（窗口永远不出现）。
 #[tauri::command]
-pub fn plugin_open(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn plugin_open(app: AppHandle, id: String) -> Result<(), String> {
     let manifest = resolve_manifest(&app, &id)?;
     let label = format!("{PLUGIN_LABEL_PREFIX}{id}");
 
@@ -230,7 +243,8 @@ pub fn plugin_open(app: AppHandle, id: String) -> Result<(), String> {
             builder = builder.inner_size(1100.0, ht);
         }
         if w.min_width.is_some() || w.min_height.is_some() {
-            builder = builder.min_inner_size(w.min_width.unwrap_or(480.0), w.min_height.unwrap_or(480.0));
+            builder =
+                builder.min_inner_size(w.min_width.unwrap_or(480.0), w.min_height.unwrap_or(480.0));
         }
         if let Some(r) = w.resizable {
             builder = builder.resizable(r);
@@ -270,7 +284,8 @@ pub async fn plugin_dev_register(app: AppHandle) -> Result<String, String> {
         .and_then(|p| p.simplified().into_path().ok())
         .ok_or("未选择目录")?;
 
-    let raw = fs::read_to_string(dir.join("manifest.json")).map_err(|e| format!("读取 manifest.json 失败: {e}"))?;
+    let raw = fs::read_to_string(dir.join("manifest.json"))
+        .map_err(|e| format!("读取 manifest.json 失败: {e}"))?;
     let manifest: PluginManifest =
         serde_json::from_str(&raw).map_err(|e| format!("解析 manifest.json 失败: {e}"))?;
     crate::plugin_manifest::validate(&manifest, None)?;
@@ -283,7 +298,11 @@ pub async fn plugin_dev_register(app: AppHandle) -> Result<String, String> {
     }
 
     let id = manifest.id.clone();
-    app.state::<DevPlugins>().0.lock().unwrap().insert(id.clone(), (manifest, dir));
+    app.state::<DevPlugins>()
+        .0
+        .lock()
+        .unwrap()
+        .insert(id.clone(), (manifest, dir));
     let _ = app.emit("toolbox://plugins-changed", ());
     Ok(id)
 }
