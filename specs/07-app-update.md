@@ -38,7 +38,7 @@ Tauri updater 端点格式，位于商店同目录：`store/app-update.json`。
 |---|---|
 | `version` | 目标版本（semver），updater 与当前版本比较后决定是否提示 |
 | `platforms` | 键为 `OS-ARCH`（`darwin-aarch64` / `darwin-x86_64` / `windows-x86_64`）；应用只读取自己平台的条目 |
-| `signature` | 对应 `.sig` 文件**原始字节的 base64**（updater 解码后做 minisign 验签；trusted comment 含 `version:` 时还会与目录版本比对，当前 CLI 产物未内嵌则跳过该步，字节级验签始终强制） |
+| `signature` | 对应 `.sig` 文件**内容原样**——tauri 产出的 `.sig` 文件本身是 minisign 签名块的单行 base64，updater 解码这一层后验签，并核对签名 trusted comment 里的 `version:`（当前 CLI 产物未内嵌则跳过该步，字节级验签始终强制）。**勿对文件内容再编一层 base64**（双重编码会让 updater 报 Invalid encoding in minisign data） |
 | `url` | 更新载体下载地址；主源指 GitHub Release 资产，Gitee 镜像由 store.yml 重写为 `https://gitee.com/<owner>/my-toolbox/releases/download/…` |
 
 更新载体：macOS 用 `.app.tar.gz`（dmg 无法静默安装）；Windows 直接用 NSIS 安装包

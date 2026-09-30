@@ -10,7 +10,7 @@
  *     "notes":    "…（Release 说明）",
  *     "pub_date": "2026-09-29T00:00:00.000Z",
  *     "platforms": {
- *       "darwin-aarch64": { "signature": "<.sig 文件内容的 base64>", "url": "<下载地址>" },
+ *       "darwin-aarch64": { "signature": "<.sig 文件内容原样>", "url": "<下载地址>" },
  *       "windows-x86_64": { "signature": "…", "url": "…" }
  *     }
  *   }
@@ -21,7 +21,10 @@
  *   - <name>_<version>_<arch>-setup.exe   → windows-x86_64
  *   - .dmg 等其余文件不是更新载体，跳过（macOS 更新走 .app.tar.gz）
  *
- * signature 字段 = .sig 文件原始字节的 base64（updater 插件解码后做 minisign 验签）。
+ * signature 字段 = .sig 文件内容**原样**——tauri 产出的 .sig 文件本身是
+ * minisign 签名块的单行 base64（解码后才是 "untrusted comment: …" 四行格式），
+ * updater 插件会自己做这一次 base64 解码再验签。切勿再对文件内容多编一层
+ * base64（双重编码会让 updater 报 Invalid encoding in minisign data）。
  *
  * 用法：
  *   node scripts/gen-update-catalog.mjs --version 0.5.0 \
@@ -100,8 +103,15 @@ for (const name of fs.readdirSync(distDir).sort()) {
     console.error(`✗ 签名缺少对应产物：${name} → ${artifact}`)
     process.exit(1)
   }
+  const sigText = fs.readFileSync(sigPath, 'utf8').trim()
+  // 结构自检：.sig 文件内容是 base64，解码后必须是 minisign 签名块
+  const inner = Buffer.from(sigText, 'base64').toString('utf8')
+  if (!inner.startsWith('untrusted comment:')) {
+    console.error(`✗ ${name} 解码后不是 minisign 签名块（应以 "untrusted comment:" 开头）——确认取的是原始 .sig 文件且未二次编码`)
+    process.exit(1)
+  }
   platforms[key] = {
-    signature: fs.readFileSync(sigPath).toString('base64'),
+    signature: sigText,
     url: baseUrl + artifact,
   }
   console.log(`✓ ${key} ← ${artifact}（${fs.statSync(artifactPath).size} 字节）`)
