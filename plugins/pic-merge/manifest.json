@@ -1,10 +1,10 @@
 {
   "formatVersion": 1,
   "id": "pic-merge",
-  "name": "拼长图",
-  "description": "多张图片纵向拼接成一张长图，可设间距背景",
+  "name": "图片拼接",
+  "description": "长图拼接与模板拼图：九宫格、爱心、异形蒙版等多种布局，支持自由拖拽拼贴，全离线",
   "author": "Font_C",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
   "minHostVersion": "0.4.0",
   "entry": "index.html",
@@ -15,9 +15,9 @@
     "fs:read"
   ],
   "window": {
-    "title": "拼长图 · 工具箱",
-    "width": 940,
-    "height": 700,
+    "title": "图片拼接 · 工具箱",
+    "width": 980,
+    "height": 740,
     "minWidth": 620,
     "minHeight": 560
   }
