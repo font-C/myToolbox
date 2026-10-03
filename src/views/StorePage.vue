@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, reactive, watch, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useStore } from '../composables/useStore'
 
@@ -14,7 +14,13 @@ const updatedAt = computed(() => {
 
 const stateLabels = { installable: '安装', updatable: '更新', installed: '已安装' }
 
-function iconUrl(entry) {
+// ---------- 图标：经 Rust 代理拉取后转 data URL ----------
+//
+// Gitee raw 的防盗链跳转让 webview 直接 <img> 加载不可靠（GitHub 直连可用，
+// 但统一走代理可两源行为一致），失败时显示名称首字母占位。
+const iconUrls = reactive({}) // 绝对 URL → data URL（未设置 = 加载中或失败）
+
+function iconRemoteUrl(entry) {
   try {
     return new URL(entry.icon ?? 'icon.png', appStore.activeStoreUrl).href
   } catch {
@@ -22,12 +28,30 @@ function iconUrl(entry) {
   }
 }
 
+function iconOf(entry) {
+  const url = iconRemoteUrl(entry)
+  return url ? iconUrls[url] || '' : ''
+}
+
+async function resolveIcons() {
+  const urls = [...new Set(entries.value.map(iconRemoteUrl).filter(Boolean))]
+  await Promise.all(
+    urls.map(async (url) => {
+      if (iconUrls[url]) return
+      const data = await store.fetchIcon(url)
+      if (data) iconUrls[url] = data
+    })
+  )
+}
+watch(entries, resolveIcons, { immediate: true })
+
 function sizeText(bytes) {
   if (!bytes) return ''
   return bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`
 }
 
 async function onInstall(entry) {
+  if (store.isInstalling(entry.id)) return
   try {
     await store.install(entry)
   } catch (e) {
@@ -71,7 +95,8 @@ onMounted(() => store.fetchIndex())
 
     <div class="grid">
       <div v-for="entry in entries" :key="entry.id" class="card">
-        <img class="card__icon" :src="iconUrl(entry)" :alt="entry.name" />
+        <img v-if="iconOf(entry)" class="card__icon" :src="iconOf(entry)" :alt="entry.name" />
+        <span v-else class="card__icon card__icon--ph">{{ (entry.name || '?').slice(0, 1) }}</span>
         <div class="card__main">
           <div class="card__title">
             <span class="card__name">{{ entry.name }}</span>
@@ -89,10 +114,10 @@ onMounted(() => store.fetchIndex())
           type="button"
           class="btn card__action"
           :class="{ 'btn--primary': store.installStateOf(entry) !== 'installed' }"
-          :disabled="store.installStateOf(entry) === 'installed' || store.loading.value"
+          :disabled="store.installStateOf(entry) === 'installed' || store.isInstalling(entry.id)"
           @click="onInstall(entry)"
         >
-          {{ stateLabels[store.installStateOf(entry)] }}
+          {{ store.isInstalling(entry.id) ? '安装中…' : stateLabels[store.installStateOf(entry)] }}
         </button>
       </div>
 
@@ -203,6 +228,16 @@ onMounted(() => store.fetchIndex())
   border-radius: 12px;
   object-fit: cover;
   flex: 0 0 auto;
+}
+.card__icon--ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #60a5fa, #3b82f6);
+  user-select: none;
 }
 .card__main {
   flex: 1;

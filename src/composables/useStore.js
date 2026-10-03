@@ -52,8 +52,14 @@ function readCache(url) {
 }
 
 function writeCache(url, data) {
-  localStorage.setItem(cacheKey(url), JSON.stringify({ fetchedAt: Date.now(), data }))
+  try {
+    localStorage.setItem(cacheKey(url), JSON.stringify({ fetchedAt: Date.now(), data }))
+  } catch {
+    // 配额满/存储不可用时忽略：缓存只是离线回退，不应让成功拉取报错
+  }
 }
+
+let fetchToken = 0
 
 /** 拉取当前激活源的索引。force 为 false 时，后台刷新（先展示缓存）。 */
 async function fetchIndex({ silent = false } = {}) {
@@ -63,6 +69,7 @@ async function fetchIndex({ silent = false } = {}) {
     error.value = '未配置商店源'
     return
   }
+  const token = ++fetchToken
   const cached = readCache(url)
   if (cached && !silent) {
     index.value = cached.data
@@ -74,15 +81,17 @@ async function fetchIndex({ silent = false } = {}) {
     const buf = await fetchWithTimeout(new URL('index.json', url).href)
     const data = JSON.parse(new TextDecoder().decode(buf))
     if (data.storeVersion !== 1) throw new Error(`不支持的商店索引版本 ${data.storeVersion}`)
+    if (token !== fetchToken) return // 已发起更新的请求，丢弃过期响应
     index.value = data
     fromCache.value = false
     writeCache(url, data)
     computeUpdates()
   } catch (e) {
+    if (token !== fetchToken) return
     if (!cached) index.value = null
     error.value = `无法加载商店：${e}（可尝试切换源）`
   } finally {
-    loading.value = false
+    if (token === fetchToken) loading.value = false
   }
 }
 
@@ -112,17 +121,63 @@ function installStateOf(entry) {
   return 'installed'
 }
 
+const installing = new Set() // 安装中的插件 id：防重复点击并发安装
+
+function isInstalling(id) {
+  return installing.has(id)
+}
+
+// ---------- 图标代理拉取 ----------
+//
+// Gitee raw 是「302 → 带签名的 CDN 地址」跳转链，webview 直接 <img> 加载不可靠
+// （其防盗链对请求来源敏感，会再次弹跳导致图片加载失败）。索引能正常加载靠的是
+// Rust 端拉取（reqwest，无 Referer），图标走同一条通道：拉字节 → data URL 渲染
+// （CSP img-src 允许 data:）。
+
+const iconCache = new Map() // 绝对 URL → data URL（进程内缓存，成功才缓存）
+
+async function fetchIcon(url) {
+  if (iconCache.has(url)) return iconCache.get(url)
+  try {
+    const buf = await fetchWithTimeout(url, 10000)
+    const bytes = new Uint8Array(buf)
+    if (!bytes.length) throw new Error('空图标')
+    // 自行判型：CDN 返回的 Content-Type 不可信
+    const mime =
+      bytes[0] === 0x89 && bytes[1] === 0x50 ? 'image/png'
+      : bytes[0] === 0xff && bytes[1] === 0xd8 ? 'image/jpeg'
+      : bytes[0] === 0x3c ? 'image/svg+xml'
+      : 'image/png'
+    const dataUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader()
+      fr.onload = () => resolve(fr.result)
+      fr.onerror = () => reject(fr.error ?? new Error('读取图标数据失败'))
+      fr.readAsDataURL(new Blob([bytes], { type: mime }))
+    })
+    iconCache.set(url, dataUrl)
+    return dataUrl
+  } catch {
+    return null // 失败不缓存：下次索引刷新时可重试
+  }
+}
+
 async function install(entry) {
-  const app = useAppStore()
-  const sourceUrl = app.activeStoreUrl
-  const pkgUrl = new URL(entry.package, sourceUrl).href
-  const buf = await fetchWithTimeout(pkgUrl, 60000)
-  const bytes = new Uint8Array(buf)
-  await invoke('plugin_install', {
-    payload: { bytes, source: 'store', sha256: entry.sha256, signature: entry.signature },
-  })
-  await app.loadPlugins()
-  computeUpdates()
+  if (installing.has(entry.id)) return
+  installing.add(entry.id)
+  try {
+    const app = useAppStore()
+    const sourceUrl = app.activeStoreUrl
+    const pkgUrl = new URL(entry.package, sourceUrl).href
+    const buf = await fetchWithTimeout(pkgUrl, 60000)
+    const bytes = new Uint8Array(buf)
+    await invoke('plugin_install', {
+      payload: { bytes, source: 'store', sha256: entry.sha256, signature: entry.signature },
+    })
+    await app.loadPlugins()
+    computeUpdates()
+  } finally {
+    installing.delete(entry.id)
+  }
 }
 
 export function useStore() {
@@ -137,5 +192,7 @@ export function useStore() {
     computeUpdates,
     installStateOf,
     install,
+    isInstalling,
+    fetchIcon,
   }
 }
