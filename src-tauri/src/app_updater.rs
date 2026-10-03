@@ -6,7 +6,10 @@
 //! 安装包经 minisign（Ed25519）验签，公钥固定在 tauri.conf.json 的 pubkey。
 
 /// 重启应用：更新安装完成后由前端调用（macOS 安装不会自行退出）。
+/// 仅限主窗口：否则任意插件窗口可反复重启宿主（DoS）。
 #[tauri::command]
-pub fn app_restart(app: tauri::AppHandle) {
-    app.restart();
+pub fn app_restart(window: tauri::WebviewWindow) -> Result<(), String> {
+    use tauri::Manager;
+    crate::plugin_registry::ensure_main(&window)?;
+    window.app_handle().restart()
 }

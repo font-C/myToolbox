@@ -2,6 +2,10 @@
 import { useAppStore } from '../stores/app'
 
 const appStore = useAppStore()
+
+function onOpen(id) {
+  appStore.openTool(id).catch((e) => console.error('[toolbox] 打开插件失败:', e))
+}
 </script>
 
 <template>
@@ -20,7 +24,7 @@ const appStore = useAppStore()
           type="button"
           class="home-tool"
           :title="plugin.manifest.description"
-          @click="appStore.openTool(plugin.id)"
+          @click="onOpen(plugin.id)"
         >
           <span class="home-tool__icon">
             <img :src="plugin.iconUrl" :alt="plugin.manifest.name" draggable="false" />
@@ -57,6 +61,15 @@ const appStore = useAppStore()
   min-height: 100%;
   display: flex;
   flex-direction: column;
+}
+/* 启动台滚动不显示滚动条（内容仍可滚动）；.home 根元素同时是 App.vue 的 .app__body 滚动容器 */
+.home,
+.home__scroll {
+  scrollbar-width: none;
+}
+.home::-webkit-scrollbar,
+.home__scroll::-webkit-scrollbar {
+  display: none;
 }
 .home__content {
   position: relative;

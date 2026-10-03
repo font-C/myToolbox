@@ -71,12 +71,18 @@ fn parse_request_path(uri_path: &str) -> Option<(String, String)> {
 /// 解析插件 id 对应的静态目录（开发模式优先）。
 fn resolve_dir_for(app: &AppHandle, id: &str) -> Option<std::path::PathBuf> {
     if cfg!(debug_assertions) {
-        if let Some((_, dir)) = app.state::<DevPlugins>().0.lock().unwrap().get(id) {
+        if let Some((_, dir)) = app
+            .state::<DevPlugins>()
+            .0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(id)
+        {
             return Some(dir.clone());
         }
     }
     let registry = app.state::<PluginRegistry>();
-    let inner = registry.0.lock().unwrap();
+    let inner = registry.0.lock().unwrap_or_else(|p| p.into_inner());
     let dir = inner.dir.as_ref()?;
     let plugin_dir = dir.join(id);
     plugin_dir.exists().then_some(plugin_dir)
@@ -155,8 +161,22 @@ fn handle_inner(app: &AppHandle, uri_path: &str) -> Response<Vec<u8>> {
     };
 
     let file_path = base_dir.join(&rel);
-    let file_path = file_path.canonicalize().unwrap_or(file_path);
-    let base_canonical = base_dir.canonicalize().unwrap_or(base_dir);
+    // 二次校验（fail-closed）：rel 里不允许残留 `.`/`..`/反斜杠成分，且
+    // canonicalize 必须成功——失败（不存在/权限/长路径异常）一律按不存在处理，
+    // 不再回退到未解析路径做 starts_with
+    if rel.is_empty()
+        || rel
+            .split('/')
+            .any(|seg| seg.is_empty() || seg == "." || seg == ".." || seg.contains('\\'))
+    {
+        return not_found(&format!("插件资源不存在: /{id}/{rel}"));
+    }
+    let Ok(file_path) = file_path.canonicalize() else {
+        return not_found(&format!("插件资源不存在: /{id}/{rel}"));
+    };
+    let Ok(base_canonical) = base_dir.canonicalize() else {
+        return not_found(&format!("插件目录不可用: /{id}"));
+    };
     if !file_path.starts_with(&base_canonical) {
         return forbidden("路径越界");
     }

@@ -38,7 +38,7 @@
       "default": [],
       "items": {
         "type": "string",
-        "enum": ["dialog:open", "dialog:save", "fs:read", "fs:write", "print", "pdf:optimize", "pdf:crypt", "clipboard:read", "clipboard:write"]
+        "enum": ["dialog:open", "dialog:save", "fs:read", "fs:write", "print", "pdf:optimize", "pdf:crypt", "clipboard:read", "clipboard:write", "storage"]
       },
       "description": "声明需要的能力；只声明实际用到的"
     },

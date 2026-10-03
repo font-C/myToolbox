@@ -1,10 +1,12 @@
 mod app_updater;
 mod broker;
+mod broker_dir;
 mod pdfops;
 mod plugin_installer;
 mod plugin_manifest;
 mod plugin_protocol;
 mod plugin_registry;
+mod plugin_storage;
 mod print;
 mod store_http;
 
@@ -18,6 +20,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         // 拖拽授权表：窗口事件（拖放/销毁）与 broker 命令都会访问，必须先于任何窗口注册
         .manage(broker::GrantState::default())
+        // 插件持久化 KV 存储（懒加载：首次访问时读盘）
+        .manage(plugin_storage::PluginStorage::default())
         .register_uri_scheme_protocol("plugin", |ctx, request| {
             plugin_protocol::handle(ctx.app_handle(), request)
         })
@@ -33,6 +37,16 @@ pub fn run() {
             broker::broker_unlock_pdf,
             broker::broker_clipboard_read_text,
             broker::broker_clipboard_write_text,
+            // 目录级访问（需 dialog:open / fs:read）：目录对比等工具用
+            broker_dir::broker_pick_directory,
+            broker_dir::broker_list_dir,
+            broker_dir::broker_dir_info,
+            // 插件持久化 KV 存储（需 storage 权限）
+            plugin_storage::broker_storage_get,
+            plugin_storage::broker_storage_set,
+            plugin_storage::broker_storage_remove,
+            plugin_storage::broker_storage_keys,
+            plugin_storage::broker_storage_clear,
             // 插件生命周期
             plugin_registry::plugin_list,
             plugin_registry::plugin_open,

@@ -16,6 +16,7 @@
 | `pdf:crypt` | 调用宿主内置 PDF 加密/解锁内核（标准安全处理器） | `broker_encrypt_pdf`、`broker_unlock_pdf` |
 | `clipboard:read` | 读取系统剪贴板文本（空/非文本返回 null） | `broker_clipboard_read_text` |
 | `clipboard:write` | 写入系统剪贴板文本 | `broker_clipboard_write_text` |
+| `storage` | 持久化 KV 存储（按插件隔离，重启不丢；见 specs/03 的 storage API） | `broker_storage_get/set/remove/keys/clear` |
 
 > `pdf:*` 权限只作用于**以字节传入的 PDF 数据**（来源仍须是用户授权的文件），
 > 不涉及任何路径访问；宿主处理在本地线程池完成，数据不落盘、不出网。
@@ -26,8 +27,15 @@
 ### 明确不存在的权限（v1）
 
 - **网络**（`net:*`）：插件页 CSP 禁止一切远程请求，插件必须离线自足
-- **剪贴板 / 通知 / 系统设置 / 进程**：无
+- **通知 / 系统设置 / 进程**：无
 - **任意路径读写**：设计上不存在。文件访问永远经由用户动作授权
+
+### storage 权限的边界
+
+- 数据按插件**强隔离**：只能读写本插件自己的 KV 空间（身份取自窗口 label，无法冒充他人）
+- 数据落宿主 `appData/plugin-data/<插件id>.json`，应用重启后仍在；**卸载插件时数据一并删除**
+- 限额：单值 1MB、每插件总量 10MB、键数 1000、键长 256（超出即报错，不影响已有数据）
+- 适合存配置、名单、项目数据等结构化小数据；大文件仍走 `dialog:save` 用户授权路径
 
 ## 二、授权模型（fs:read / fs:write 的边界）
 
@@ -50,6 +58,7 @@
 - 需要打印：`["print"]`
 - 调用宿主 PDF 处理内核：`["pdf:optimize"]`（压缩）/ `["pdf:crypt"]`（加密、解锁）
 - 读写系统剪贴板：`["clipboard:read"]` / `["clipboard:write"]`（剪贴板历史等工具）
+- 需要记住用户数据/设置（重启不丢）：`["storage"]`（排课、名单、各类配置）
 
 ## 四、运行时违规的表现
 

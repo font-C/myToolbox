@@ -81,16 +81,98 @@ export const toolbox = {
 
   /**
    * 读取本插件已授权的路径（需 manifest 声明 fs:read）。
-   * 授权来源：pickOpenFile 选中的文件、拖拽进窗口的文件、pickSaveFile 的目标。
+   * 授权来源：pickOpenFile 选中的文件、拖拽进窗口的文件、pickSaveFile 的目标、
+   * pickDirectory 选中的目录（目录之下任意路径随目录一并放行）。
    * @returns {Promise<Uint8Array>}
    */
   async readGranted(path) {
     return asBytes(await invoke('broker_read_granted', { path }))
   },
 
-  /** 调起系统打印（需 manifest 声明 print）。当前支持 PDF 字节。 */
-  async printPdf(bytes) {
-    return invoke('broker_print', { bytes: asBytes(bytes) })
+  /**
+   * 打开系统目录选择对话框（需 manifest 声明 dialog:open）。
+   * 目录路径记入本插件的会话授权表：其下所有文件随之可读（readGranted / listDir）。
+   * @returns {Promise<{path: string, name: string}|null>} 用户取消返回 null
+   */
+  async pickDirectory() {
+    return invoke('broker_pick_directory')
+  },
+
+  /**
+   * 递归列出已授权目录下的全部文件（需 manifest 声明 fs:read）。
+   * 跳过符号链接；文件数上限 20000，超出时 truncated=true。
+   * @param {string} path 已授权的目录路径（含其下子目录）
+   * @returns {Promise<{truncated: boolean, entries: {path: string, size: number}[]}>} path 为相对该目录的路径
+   */
+  async listDir(path) {
+    return invoke('broker_list_dir', { path })
+  },
+
+  /**
+   * 判断已授权路径是否为目录并返回其文件清单；非目录或未授权返回 null（需 fs:read）。
+   * 用于拖拽导入时区分「拖入的是目录还是文件」。
+   */
+  async dirInfo(path) {
+    return invoke('broker_dir_info', { path })
+  },
+
+  /** 调起系统打印（需 manifest 声明 print）。当前支持 PDF 字节。
+   * @param {Uint8Array|ArrayBuffer} bytes
+   * @param {{ name?: string }} [options] 可选文档名：用于打印临时文件名与打印队列展示，
+   *   宿主会清洗特殊字符；缺省用插件 id。
+   */
+  async printPdf(bytes, options = {}) {
+    return invoke('broker_print', { bytes: asBytes(bytes), name: options.name ?? null })
+  },
+
+  // ---------- 持久化 KV 存储（需 manifest 声明 storage） ----------
+  //
+  // 数据按插件隔离存储于宿主 appData/plugin-data/<插件id>.json，应用重启后仍在。
+  // 键为字符串，值为可 JSON 序列化的任意数据（对象/数组/字符串/数字/布尔/null）。
+  // 限额：单值 1MB、每插件总量 10MB、键数 1000、键长 256。卸载插件时数据一并删除。
+
+  /**
+   * 读取键值（需 storage 权限）。
+   * @param {string} key
+   * @returns {Promise<any>} 键不存在时返回 null
+   */
+  async storageGet(key) {
+    return invoke('broker_storage_get', { key })
+  },
+
+  /**
+   * 写入键值（需 storage 权限）。写入即落盘，应用重启后仍在。
+   * @param {string} key
+   * @param {any} value 可 JSON 序列化的数据
+   * @returns {Promise<void>} 超出限额时 rejected
+   */
+  async storageSet(key, value) {
+    return invoke('broker_storage_set', { key, value: value ?? null })
+  },
+
+  /**
+   * 删除键（需 storage 权限）。键不存在时静默成功。
+   * @param {string} key
+   * @returns {Promise<void>}
+   */
+  async storageRemove(key) {
+    return invoke('broker_storage_remove', { key })
+  },
+
+  /**
+   * 列出本插件全部键（需 storage 权限）。
+   * @returns {Promise<string[]>}
+   */
+  async storageKeys() {
+    return invoke('broker_storage_keys')
+  },
+
+  /**
+   * 清空本插件全部数据（需 storage 权限）。
+   * @returns {Promise<void>}
+   */
+  async storageClear() {
+    return invoke('broker_storage_clear')
   },
 
   /**

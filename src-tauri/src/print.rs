@@ -1,4 +1,4 @@
-//! 原生 PDF 打印实现（平台相关），供主窗口旧命令（过渡期）与 broker_print 复用。
+//! 原生 PDF 打印实现（平台相关），供 broker_print 复用。
 //!
 //! macOS：PDFKit 文档级打印，每个 PDF 页按比例缩放适配到单张物理纸。
 //! 过程阻塞直到用户完成/取消打印（`NSPrintOperation::runOperation()` 同步），无额外窗口。
@@ -10,50 +10,104 @@
 //! Windows：pdfium-render 把 PDF 逐页渲染成 RGBA 位图（内存），再用 Windows GDI 的
 //! 文档打印链路（CreateDC → StartDocW → 逐页 StartPage/StretchDIBits/EndPage → EndDoc）
 //! 输出到默认打印机。每页「按比例缩放并居中适配到单张物理纸」。
+//!
+//! 临时文件（两平台共用约定）：
+//! - 文件名保留可读的文档名（插件经 broker 传入，缺省为插件 id），经正则白名单
+//!   清洗特殊字符；`create_new` 独占创建，防覆盖与符号链接预占；
+//! - RAII 清理守卫保证任何返回路径（含全部错误分支）都删除临时 PDF，
+//!   用户文档不残留在临时目录。
 
 use std::fs::File;
 use std::io::Write;
+use std::sync::OnceLock;
 
-pub fn print_pdf_impl(app: &tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
+pub fn print_pdf_impl(app: &tauri::AppHandle, bytes: Vec<u8>, doc_name: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        return print_macos(app, bytes);
+        return print_macos(app, bytes, doc_name);
     }
     #[cfg(target_os = "windows")]
     {
-        return print_windows(app, bytes);
+        return print_windows(app, bytes, doc_name);
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app;
         let _ = bytes;
+        let _ = doc_name;
         Err("当前平台暂不支持原生 PDF 打印".to_string())
     }
 }
 
+// ---------- 打印临时文件 ----------
+
+/// 文档名白名单清洗：保留中英文、数字、`-`、`_`，剔除路径分隔符与其余
+/// 特殊字符；清洗后为空回退 "doc"；截断到 64 字符。
+fn sanitize_doc_name(s: &str) -> String {
+    static SAFE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = SAFE.get_or_init(|| regex::Regex::new(r"[^\p{Han}A-Za-z0-9_-]").expect("内置正则非法"));
+    let cleaned: String = re.replace_all(s, "").chars().take(64).collect();
+    if cleaned.is_empty() {
+        "doc".into()
+    } else {
+        cleaned
+    }
+}
+
+/// 生成临时 PDF 路径并独占创建（`create_new` 防覆盖与符号链接预占，
+/// 同名冲突时追加序号重试）。返回 (路径, 已打开文件)。
+fn create_temp_pdf(doc_name: &str) -> Result<(std::path::PathBuf, File), String> {
+    let base = sanitize_doc_name(doc_name);
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir();
+    let mut candidate = dir.join(format!("toolbox_print_{base}_{millis}.pdf"));
+    for attempt in 0..5 {
+        match File::options().write(true).create_new(true).open(&candidate) {
+            Ok(f) => return Ok((candidate, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                candidate = dir.join(format!("toolbox_print_{base}_{millis}-{attempt}.pdf"));
+            }
+            Err(e) => return Err(format!("创建临时文件失败: {e}")),
+        }
+    }
+    Err("创建打印临时文件失败：重试多次仍冲突".into())
+}
+
+/// 临时文件清理守卫：构造后无论从哪个路径返回（含 `?` 提前返回的错误分支）
+/// 都会删除临时 PDF。
+struct TempFileGuard(std::path::PathBuf);
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_file(&self.0) {
+            eprintln!("清理打印临时文件失败: {e}");
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
-fn print_macos(app: &tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
+fn print_macos(app: &tauri::AppHandle, bytes: Vec<u8>, doc_name: &str) -> Result<(), String> {
     use objc2::AnyThread;
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSPrintInfo;
     use objc2_foundation::{NSString, NSURL};
     use objc2_pdf_kit::{PDFDocument, PDFPrintScalingMode};
 
+    let name = sanitize_doc_name(doc_name);
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     app.run_on_main_thread(move || {
         let res: Result<(), String> = (|| -> Result<(), String> {
+            // 临时文件 + 清理守卫在闭包内创建：覆盖解析失败等全部错误分支
+            let (temp_path, mut file) = create_temp_pdf(&name)?;
+            file.write_all(&bytes).map_err(|e| format!("写入临时文件失败: {e}"))?;
+            let _guard = TempFileGuard(temp_path.clone());
+
             unsafe {
                 let mtm = MainThreadMarker::new().ok_or("必须在主线程执行打印")?;
-
-                let millis = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis())
-                    .unwrap_or(0);
-                let temp_path = std::env::temp_dir().join(format!("toolbox_print_{}.pdf", millis));
                 let temp_path_str = temp_path.to_str().ok_or("临时文件路径无效")?;
-
-                let mut file = File::create(&temp_path).map_err(|e| format!("创建临时文件失败: {e}"))?;
-                file.write_all(&bytes).map_err(|e| format!("写入临时文件失败: {e}"))?;
 
                 let path_str = NSString::from_str(temp_path_str);
                 let url = NSURL::fileURLWithPath(&path_str);
@@ -73,12 +127,8 @@ fn print_macos(app: &tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
                     )
                     .ok_or_else(|| "创建打印操作失败".to_string())?;
 
-                // 同步运行，阻塞直到用户处理完打印对话框才返回
+                // 同步运行，阻塞直到用户处理完打印对话框才返回；临时文件由守卫清理
                 operation.runOperation();
-
-                if let Err(e) = std::fs::remove_file(&temp_path) {
-                    eprintln!("清理临时文件失败: {e}");
-                }
                 Ok(())
             }
         })();
@@ -138,7 +188,7 @@ fn find_pdfium_lib(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
 }
 
 #[cfg(target_os = "windows")]
-fn print_windows(app: &tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
+fn print_windows(app: &tauri::AppHandle, bytes: Vec<u8>, doc_name: &str) -> Result<(), String> {
     use pdfium_render::prelude::*;
     use windows_sys::Win32::Graphics::Gdi::{
         CreateDCW, DeleteDC, GetDeviceCaps, StretchDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
@@ -147,14 +197,10 @@ fn print_windows(app: &tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
     use windows_sys::Win32::Graphics::Printing::GetDefaultPrinterW;
     use windows_sys::Win32::Storage::Xps::{EndDoc, EndPage, StartDocW, StartPage, DOCINFOW};
 
-    // 1) 写入临时 PDF 文件
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let temp_path = std::env::temp_dir().join(format!("toolbox_print_win_{}.pdf", millis));
-    let mut file = File::create(&temp_path).map_err(|e| format!("创建临时文件失败: {e}"))?;
+    // 1) 写入临时 PDF 文件（create_new 独占创建；守卫保证任何错误分支都清理）
+    let (temp_path, mut file) = create_temp_pdf(doc_name)?;
     file.write_all(&bytes).map_err(|e| format!("写入临时文件失败: {e}"))?;
+    let _guard = TempFileGuard(temp_path.clone());
 
     // 2) 绑定并加载 PDF
     let lib_path =
@@ -205,8 +251,9 @@ fn print_windows(app: &tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
     let dpi_x = (print_w as f64) / (paper_w_mm as f64 / 25.4);
     let dpi_y = (print_h as f64) / (paper_h_mm as f64 / 25.4);
 
-    // 5) 开始文档
-    let doc_name_wide: Vec<u16> = "工具箱打印".encode_utf16().chain(std::iter::once(0)).collect();
+    // 5) 开始文档（打印队列中显示清洗后的文档名）
+    let doc_display = sanitize_doc_name(doc_name);
+    let doc_name_wide: Vec<u16> = doc_display.encode_utf16().chain(std::iter::once(0)).collect();
     let di = DOCINFOW {
         cbSize: std::mem::size_of::<DOCINFOW>() as i32,
         lpszDocName: doc_name_wide.as_ptr(),
@@ -313,13 +360,47 @@ fn print_windows(app: &tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
         }
     }
 
-    // 7) 结束文档，清理资源
+    // 7) 结束文档，清理资源（临时文件由守卫在函数返回时删除）
     let doc_ok = unsafe { EndDoc(hdc) } > 0;
     let _ = unsafe { DeleteDC(hdc) };
-    let _ = std::fs::remove_file(&temp_path);
 
     if !doc_ok {
         return Err("EndDoc 失败".to_string());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_keeps_readable_name() {
+        assert_eq!(sanitize_doc_name("口算题卡"), "口算题卡");
+        // 空格按特殊字符剔除，其余可读字符保留
+        assert_eq!(sanitize_doc_name("Worksheet A-1_2"), "WorksheetA-1_2");
+        // 路径分隔符与特殊字符被剔除
+        assert_eq!(sanitize_doc_name("a/b\\c:d*e?.pdf"), "abcdepdf");
+        assert_eq!(sanitize_doc_name("../../etc/passwd"), "etcpasswd");
+        // 全部被清洗后回退
+        assert_eq!(sanitize_doc_name("***"), "doc");
+        assert_eq!(sanitize_doc_name(""), "doc");
+        // 截断到 64 字符
+        let long = "名".repeat(100);
+        assert_eq!(sanitize_doc_name(&long).chars().count(), 64);
+    }
+
+    #[test]
+    fn temp_pdf_created_exclusive() {
+        let (path, _file) = create_temp_pdf("测试/name*").expect("应能创建临时文件");
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        assert!(name.starts_with("toolbox_print_测试name_"));
+        assert!(name.ends_with(".pdf"));
+        assert!(path.exists());
+        // 同名再创建必须走重试而非覆盖
+        let (path2, _file2) = create_temp_pdf(&name).expect("冲突时应重试出新名");
+        assert_ne!(path, path2);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&path2);
+    }
 }

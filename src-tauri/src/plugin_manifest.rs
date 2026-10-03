@@ -124,6 +124,7 @@ pub const KNOWN_PERMISSIONS: &[&str] = &[
     "pdf:crypt",
     "clipboard:read",
     "clipboard:write",
+    "storage",
 ];
 
 /// 宽松 semver：x.y.z（数字段），忽略预发布后缀（按相等处理）。

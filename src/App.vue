@@ -24,19 +24,29 @@ const views = { home: HomePage, store: StorePage, manage: ManagePage, settings: 
 const currentView = computed(() => views[appStore.view] ?? HomePage)
 
 let unlisten = null
-onMounted(async () => {
+let disposed = false
+onMounted(() => {
+  // 事件监听最先注册：后续任一初始化步骤失败都不能影响插件变化感知
+  listen('toolbox://plugins-changed', () => {
+    appStore.loadPlugins()
+      .then(() => store.computeUpdates())
+      .catch((e) => console.error('[toolbox] 刷新插件列表失败:', e))
+  }).then((fn) => {
+    if (disposed) fn()
+    else unlisten = fn
+  })
+  // 各步骤独立容错：任一步失败不阻断其余步骤
   appStore.loadStoreConfig()
-  await appStore.init()
+  appStore.init().catch((e) => console.error('[toolbox] 初始化失败:', e))
   // 静默检查插件更新（供商店页与红点使用，失败不打扰）
-  store.checkUpdatesSilently()
+  store.checkUpdatesSilently().catch(() => {})
   // 静默检查主程序更新（供设置页与红点使用，失败不打扰）
   appUpdater.checkAppUpdate({ silent: true })
-  // 插件变化（安装/卸载/启停/开发注册）后刷新列表
-  unlisten = await listen('toolbox://plugins-changed', () => {
-    appStore.loadPlugins().then(() => store.computeUpdates())
-  })
 })
-onBeforeUnmount(() => unlisten?.())
+onBeforeUnmount(() => {
+  disposed = true
+  unlisten?.()
+})
 </script>
 
 <template>

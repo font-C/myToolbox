@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::plugin_manifest::{PluginManifest, HOST_API_VERSION};
@@ -41,6 +41,15 @@ pub struct PluginRegistry(pub Mutex<RegistryInner>);
 #[derive(Default)]
 pub struct DevPlugins(pub Mutex<HashMap<String, (PluginManifest, PathBuf)>>);
 
+/// 仅允许主窗口调用（插件窗口不得触达生命周期/商店/更新类命令）。
+pub(crate) fn ensure_main(window: &WebviewWindow) -> Result<(), String> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err("该命令仅允许在主窗口调用".into())
+    }
+}
+
 /// setup 阶段调用：定位插件目录并加载 installed.json（缺失视为空表）。
 pub fn init(app: &AppHandle) -> Result<(), String> {
     let data_dir = app
@@ -52,10 +61,31 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
 
     let registry_path = plugins_dir.join("installed.json");
     let plugins = if registry_path.exists() {
-        let raw = fs::read_to_string(&registry_path)
-            .map_err(|e| format!("读取 installed.json 失败: {e}"))?;
-        serde_json::from_str::<HashMap<String, InstalledPlugin>>(&raw)
-            .map_err(|e| format!("解析 installed.json 失败: {e}"))?
+        // 单个坏文件不应让应用永久无法启动：备份后以空表启动（代价是内置插件
+        // 会被重新装回、商店插件需重装；其 plugin-data 数据文件不受影响）。
+        match fs::read_to_string(&registry_path)
+            .map_err(|e| format!("读取失败: {e}"))
+            .and_then(|raw| {
+                serde_json::from_str::<HashMap<String, InstalledPlugin>>(&raw)
+                    .map_err(|e| format!("解析失败: {e}"))
+            }) {
+            Ok(map) => map,
+            Err(e) => {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                let bak = plugins_dir.join(format!("installed.json.bak-{stamp}"));
+                let backup_note = match fs::rename(&registry_path, &bak) {
+                    Ok(_) => format!("已备份为 {}", bak.display()),
+                    Err(_) => "备份失败（文件保留原位）".to_string(),
+                };
+                crate::plugin_installer::log::err(&format!(
+                    "installed.json 损坏（{e}），{backup_note}，以空插件表启动"
+                ));
+                HashMap::new()
+            }
+        }
     } else {
         HashMap::new()
     };
@@ -106,13 +136,13 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
 pub fn resolve_manifest(app: &AppHandle, id: &str) -> Result<PluginManifest, String> {
     if cfg!(debug_assertions) {
         let devs = app.state::<DevPlugins>();
-        let table = devs.0.lock().unwrap();
+        let table = devs.0.lock().unwrap_or_else(|p| p.into_inner());
         if let Some((manifest, _)) = table.get(id) {
             return Ok(manifest.clone());
         }
     }
     let registry = app.state::<PluginRegistry>();
-    let inner = registry.0.lock().unwrap();
+    let inner = registry.0.lock().unwrap_or_else(|p| p.into_inner());
     inner
         .plugins
         .get(id)
@@ -158,7 +188,7 @@ pub fn plugin_list(app: AppHandle) -> Result<Vec<PluginInfo>, String> {
         )
     };
     let registry = app.state::<PluginRegistry>();
-    let inner = registry.0.lock().unwrap();
+    let inner = registry.0.lock().unwrap_or_else(|p| p.into_inner());
     let mut list: Vec<PluginInfo> = inner
         .plugins
         .values()
@@ -179,7 +209,7 @@ pub fn plugin_list(app: AppHandle) -> Result<Vec<PluginInfo>, String> {
     // 开发模式插件（debug 构建）合并展示
     if cfg!(debug_assertions) {
         let devs = app.state::<DevPlugins>();
-        let table = devs.0.lock().unwrap();
+        let table = devs.0.lock().unwrap_or_else(|p| p.into_inner());
         for (id, (manifest, _)) in table.iter() {
             if inner.plugins.contains_key(id) {
                 continue; // 已安装版本优先展示
@@ -224,14 +254,18 @@ pub async fn plugin_open(app: AppHandle, id: String) -> Result<(), String> {
         .title(manifest.window.as_ref().and_then(|w| w.title.clone()).unwrap_or_else(|| manifest.name.clone()))
         .inner_size(1100.0, 800.0)
         .min_inner_size(480.0, 480.0)
-        .resizable(true)
-        // 调试：插件页 JS 错误经 plugin://localhost/debuglog/ 上报到宿主 stderr
-        .initialization_script(
+        .resizable(true);
+    // 调试：插件页 JS 错误经 plugin://localhost/debuglog/ 上报到宿主 stderr（仅 debug 构建，
+    // release 下该端点不存在，脚本只会产生无效请求）
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.initialization_script(
             "const __rep = (m) => { try { fetch('plugin://localhost/debuglog/' + encodeURIComponent(String(m).slice(0, 400))).catch(() => {}); } catch (e) {} };\
              __rep('INIT ' + location.href);\
              window.addEventListener('error', (e) => { __rep('ERR ' + ((e.target && e.target !== window && (e.target.src || e.target.href)) ? (e.target.src || e.target.href) : (e.message || e.error))); }, true);\
              window.addEventListener('unhandledrejection', (e) => { __rep('REJ ' + (e.reason && e.reason.message || e.reason)); });",
         );
+    }
 
     if let Some(w) = &manifest.window {
         if let Some(t) = &w.title {
@@ -258,10 +292,17 @@ pub async fn plugin_open(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 /// 启用/停用插件。停用后不出现在启动台；已开窗口不强制关闭。
+/// 仅限主窗口：否则插件可自行解除停用或干扰其他插件。
 #[tauri::command]
-pub fn plugin_set_enabled(app: AppHandle, id: String, enabled: bool) -> Result<(), String> {
+pub fn plugin_set_enabled(
+    window: WebviewWindow,
+    app: AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    ensure_main(&window)?;
     let registry = app.state::<PluginRegistry>();
-    let mut inner = registry.0.lock().unwrap();
+    let mut inner = registry.0.lock().unwrap_or_else(|p| p.into_inner());
     let entry = inner.plugins.get_mut(&id).ok_or("插件不存在")?;
     entry.enabled = enabled;
     persist(&inner)?;
@@ -301,7 +342,7 @@ pub async fn plugin_dev_register(app: AppHandle) -> Result<String, String> {
     app.state::<DevPlugins>()
         .0
         .lock()
-        .unwrap()
+        .unwrap_or_else(|p| p.into_inner())
         .insert(id.clone(), (manifest, dir));
     let _ = app.emit("toolbox://plugins-changed", ());
     Ok(id)
@@ -313,7 +354,11 @@ pub fn plugin_dev_unregister(app: AppHandle, id: String) -> Result<(), String> {
     if !cfg!(debug_assertions) {
         return Err("开发模式插件管理仅在 debug 构建中可用".into());
     }
-    app.state::<DevPlugins>().0.lock().unwrap().remove(&id);
+    app.state::<DevPlugins>()
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&id);
     let label = format!("{PLUGIN_LABEL_PREFIX}{id}");
     if let Some(w) = app.get_webview_window(&label) {
         let _ = w.close();
@@ -326,7 +371,7 @@ pub fn plugin_dev_unregister(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn plugin_dev_list(app: AppHandle) -> Result<Vec<String>, String> {
     let state = app.state::<DevPlugins>();
-    let devs = state.0.lock().unwrap();
+    let devs = state.0.lock().unwrap_or_else(|p| p.into_inner());
     let mut ids: Vec<String> = devs.keys().cloned().collect();
     ids.sort();
     Ok(ids)

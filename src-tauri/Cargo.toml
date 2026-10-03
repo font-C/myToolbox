@@ -35,6 +35,8 @@ arboard = "3"
 # 商店拉取（Rust 端 HTTP）：绕开 webview CORS，任何 https 目录都能当商店源
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 tokio = { version = "1", features = ["rt", "macros"] }
+# 打印临时文件文档名清洗（print.rs 白名单正则）
+regex = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "=0.6.4"

@@ -61,10 +61,16 @@ const [file] = await toolbox.pickOpenFile({
 读取**已授权路径**。**权限：`fs:read`**。未授权或路径失效时抛错。
 典型用途：拖拽 drop 事件拿到路径后读取内容。
 
-### `toolbox.printPdf(bytes: Uint8Array): Promise<void>`
+### `toolbox.printPdf(bytes, options?): Promise<void>`
 
 调起系统打印（PDF 字节）。**权限：`print`**。macOS 走 PDFKit，Windows 走 pdfium+GDI，
 每页按比例缩放适配单张纸并居中；其它平台返回明确错误。
+
+```ts
+// options
+{ name?: string } // 可选文档名：用于打印临时文件名与打印队列展示，
+                  // 宿主清洗特殊字符（保留中英文/数字/-/_），缺省用插件 id
+```
 
 ### `toolbox.readClipboardText(): Promise<string | null>`
 
@@ -106,6 +112,37 @@ drop 的文件路径已由宿主自动记入授权表，配合 `readGranted` 使
   onLeave?: () => void,
   onDrop?: (files: { path: string; name: string }[]) => void,
 }
+```
+
+### `toolbox.storageGet(key): Promise<any>`
+
+读取本插件持久化 KV。**权限：`storage`**。键不存在返回 `null`。
+
+### `toolbox.storageSet(key, value): Promise<void>`
+
+写入键值并立即落盘（应用重启后仍在）。**权限：`storage`**。
+值为可 JSON 序列化的任意数据；超出限额（单值 1MB / 每插件总量 10MB /
+键数 1000 / 键长 256）时 rejected。数据按插件强隔离，卸载插件时一并删除。
+
+### `toolbox.storageRemove(key): Promise<void>`
+
+删除键。**权限：`storage`**。键不存在时静默成功。
+
+### `toolbox.storageKeys(): Promise<string[]>`
+
+列出本插件全部键（字典序）。**权限：`storage`**。
+
+### `toolbox.storageClear(): Promise<void>`
+
+清空本插件全部数据。**权限：`storage`**。
+
+```js
+// 典型用法：配置持久化（启动时恢复、变更时写回）
+onMounted(async () => {
+  const saved = await toolbox.storageGet('config')
+  if (saved) Object.assign(config, saved)
+})
+watch(config, (v) => toolbox.storageSet('config', v).catch(() => {}), { deep: true })
 ```
 
 ### `toolbox.close(): Promise<void>`
