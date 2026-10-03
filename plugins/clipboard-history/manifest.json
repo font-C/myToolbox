@@ -4,14 +4,15 @@
   "name": "剪贴板历史",
   "description": "自动记录复制过的文本，一键取回；仅本机保存",
   "author": "Font_C",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
   "minHostVersion": "0.4.0",
   "entry": "index.html",
   "icon": "icon.png",
   "permissions": [
     "clipboard:read",
-    "clipboard:write"
+    "clipboard:write",
+    "storage"
   ],
   "window": {
     "title": "剪贴板历史 · 工具箱",

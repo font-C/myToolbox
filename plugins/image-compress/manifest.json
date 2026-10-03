@@ -4,7 +4,7 @@
   "name": "图片压缩",
   "description": "批量压缩图片、转格式、改尺寸、加文字水印，打包下载",
   "author": "Font_C",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
   "minHostVersion": "0.4.0",
   "entry": "index.html",
@@ -12,7 +12,8 @@
   "permissions": [
     "dialog:save",
     "fs:write",
-    "fs:read"
+    "fs:read",
+    "storage"
   ],
   "window": {
     "title": "图片压缩 · 工具箱",

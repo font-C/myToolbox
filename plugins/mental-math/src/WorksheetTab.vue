@@ -112,8 +112,35 @@ const wrapEl = ref(null)
 const scale = ref(1)
 let ro = null
 
-onMounted(attachScale)
+// —— 题卡配置持久化（宿主 storage）：重启后保留 ——
+const WS_CONFIG_KEY = 'worksheetConfig'
+let wsHydrated = false
+
+onMounted(async () => {
+  attachScale()
+  try {
+    const saved = await toolbox.storageGet(WS_CONFIG_KEY)
+    if (saved && typeof saved === 'object') {
+      if (Array.isArray(saved.ops) && saved.ops.length) {
+        wConfig.ops = saved.ops.filter((o) => ['+', '-', '*', '/'].includes(o))
+      }
+      for (const k of ['lo', 'hi', 'resultMin', 'resultMax', 'count']) {
+        if (Number.isFinite(saved[k]) && saved[k] > 0) wConfig[k] = saved[k]
+      }
+      if (typeof saved.mixed === 'boolean') wConfig.mixed = saved.mixed
+      if (saved.division === 'exact' || saved.division === 'remainder') wConfig.division = saved.division
+      if ([2, 3, 4, 5].includes(saved.cols)) wConfig.cols = saved.cols
+      if (typeof saved.withAnswers === 'boolean') wConfig.withAnswers = saved.withAnswers
+    }
+  } catch {}
+  wsHydrated = true
+})
 onBeforeUnmount(() => ro?.disconnect())
+
+watch(wConfig, () => {
+  if (!wsHydrated) return
+  toolbox.storageSet(WS_CONFIG_KEY, { ...wConfig, ops: [...wConfig.ops] }).catch(() => {})
+})
 
 // 预览区由 v-if 渲染：进入预览后 wrapEl 才存在，需（重新）挂观察器
 watch(showPreview, async (v) => {
@@ -151,7 +178,7 @@ async function printSheet() {
   working.value = true
   try {
     if (isTauri()) {
-      await toolbox.printPdf(await buildPdfBytes())
+      await toolbox.printPdf(await buildPdfBytes(), { name: '口算题卡' })
     } else {
       printViaBrowser()
     }

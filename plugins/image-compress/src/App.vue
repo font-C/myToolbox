@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { toolbox } from '@toolbox/plugin-sdk'
 import { useNativeFileDrop } from '@toolbox/plugin-sdk'
 import { zipSync } from 'fflate'
@@ -29,6 +29,30 @@ const resizeOpen = ref(false)
 const resizeDraft = ref(null)
 const wmOpen = ref(false)
 const wmDraft = ref(null)
+
+// —— 设置持久化（宿主 storage）：重启后保留 ——
+const SETTINGS_KEY = 'settings'
+let settingsHydrated = false
+onMounted(async () => {
+  try {
+    const saved = await toolbox.storageGet(SETTINGS_KEY)
+    if (saved && typeof saved === 'object') {
+      if (['image/jpeg', 'image/png', 'image/webp'].includes(saved.format)) settings.format = saved.format
+      if (Number.isFinite(saved.quality)) settings.quality = Math.min(100, Math.max(1, saved.quality))
+      if (saved.resize && typeof saved.resize === 'object') Object.assign(settings.resize, saved.resize)
+      if (saved.watermark && typeof saved.watermark === 'object') Object.assign(settings.watermark, saved.watermark)
+    }
+  } catch {}
+  settingsHydrated = true
+})
+watch(
+  settings,
+  () => {
+    if (!settingsHydrated) return
+    toolbox.storageSet(SETTINGS_KEY, JSON.parse(JSON.stringify(settings))).catch(() => {})
+  },
+  { deep: true }
+)
 
 const extOf = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
 const formatNames = { 'image/jpeg': 'JPEG', 'image/png': 'PNG', 'image/webp': 'WebP' }

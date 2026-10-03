@@ -1,7 +1,7 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { usePlannerStore } from './store.js'
-import { openPlanFile, savePlanFile } from './io.js'
+import { openPlanFile, savePlanFile, storageFlushPending } from './io.js'
 import TimeGridSection from './components/TimeGridSection.vue'
 import ClassesSection from './components/ClassesSection.vue'
 import TeachersSection from './components/TeachersSection.vue'
@@ -33,7 +33,17 @@ const sections = [
 ]
 const viewMap = Object.fromEntries(sections.flatMap((g) => g.items.map((i) => [i.id, i])))
 
-onMounted(() => store.restoreSession())
+onMounted(() => {
+  store.restoreSession()
+  // 窗口关闭/隐藏前把防抖中的方案立即落盘
+  window.addEventListener('pagehide', storageFlushPending)
+  window.addEventListener('beforeunload', storageFlushPending)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', storageFlushPending)
+  window.removeEventListener('beforeunload', storageFlushPending)
+  storageFlushPending()
+})
 
 watch(
   () => store.project,

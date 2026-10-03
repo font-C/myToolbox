@@ -4,7 +4,7 @@
   "name": "二维码工具",
   "description": "生成文字/网址/WiFi/名片二维码，识别二维码图片；纯离线",
   "author": "Font_C",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
   "minHostVersion": "0.4.0",
   "entry": "index.html",
@@ -12,7 +12,8 @@
   "permissions": [
     "dialog:save",
     "fs:write",
-    "fs:read"
+    "fs:read",
+    "clipboard:write"
   ],
   "window": {
     "title": "二维码工具 · 工具箱",

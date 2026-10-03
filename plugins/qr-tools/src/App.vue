@@ -23,11 +23,12 @@ function fmtSize(n) {
 
 async function copyText(text) {
   try {
-    await navigator.clipboard.writeText(text)
+    // 走宿主 broker 剪贴板（需 clipboard:write）：自定义协议下 navigator.clipboard 可能不可用
+    await toolbox.writeClipboardText(text)
     copied.value = true
     setTimeout(() => (copied.value = false), 1500)
   } catch {
-    // 剪贴板 API 不可用时退化为选中文本让用户 Ctrl+C
+    // broker 不可用时退化为选中文本让用户 Ctrl+C
     const ta = document.createElement('textarea')
     ta.value = text
     document.body.appendChild(ta)

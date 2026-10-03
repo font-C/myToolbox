@@ -1,10 +1,46 @@
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as XLSX from 'xlsx'
+import { toolbox } from '@toolbox/plugin-sdk'
 
 const tab = ref('roll') // roll | timer | group
 const error = ref('')
 const notice = ref('')
+
+// ---------- 持久化（宿主 storage）：名单与设置重启后保留 ----------
+const PRESETS_KEY = 'presets'
+let hydrated = false
+
+async function hydrate() {
+  try {
+    const saved = await toolbox.storageGet(PRESETS_KEY)
+    if (saved && typeof saved === 'object') {
+      if (typeof saved.rollRoster === 'string') rosterText.value = saved.rollRoster
+      if (typeof saved.noRepeat === 'boolean') noRepeat.value = saved.noRepeat
+      if (typeof saved.groupRoster === 'string') groupRosterText.value = saved.groupRoster
+      if (saved.groupMode === 'count' || saved.groupMode === 'size') groupMode.value = saved.groupMode
+      if (Number.isFinite(saved.groupNum)) groupNum.value = saved.groupNum
+      if (Number.isFinite(saved.groupSize)) groupSize.value = saved.groupSize
+      if (Number.isFinite(saved.timerSec) && saved.timerSec > 0) totalSec.value = saved.timerSec
+    }
+  } catch {}
+  hydrated = true
+}
+
+function persistPresets() {
+  if (!hydrated) return
+  toolbox
+    .storageSet(PRESETS_KEY, {
+      rollRoster: rosterText.value,
+      noRepeat: noRepeat.value,
+      groupRoster: groupRosterText.value,
+      groupMode: groupMode.value,
+      groupNum: Number(groupNum.value),
+      groupSize: Number(groupSize.value),
+      timerSec: Number(totalSec.value),
+    })
+    .catch(() => {})
+}
 
 // ---------- 名单导入（Excel/CSV，两处名单共用） ----------
 const HEADER_WORDS = /^(姓名|名字|名单|序号|编号|学号|no\.?|name|id)$/i
@@ -203,6 +239,12 @@ onUnmounted(() => {
   if (rollTimer) clearInterval(rollTimer)
   if (timerId) clearInterval(timerId)
 })
+
+watch(
+  [rosterText, noRepeat, groupRosterText, groupMode, groupNum, groupSize, totalSec],
+  persistPresets
+)
+onMounted(hydrate)
 </script>
 
 <template>

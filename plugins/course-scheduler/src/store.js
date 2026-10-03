@@ -26,7 +26,7 @@ import {
   checkScheduleIntegrity,
 } from './solver/manual.js'
 import { loadSampleProject } from './sample.js'
-import { sessionLoad, sessionSave } from './io.js'
+import { storageLoad, storageSaveDebounced } from './io.js'
 
 export const usePlannerStore = defineStore('planner', {
   state: () => ({
@@ -39,6 +39,8 @@ export const usePlannerStore = defineStore('planner', {
     /** 确认框（Promise 风格） */
     confirmBox: null,
     _confirmResolve: null,
+    /** 宿主存储恢复完成后才允许写入，防止恢复过程中的旧数据覆盖 */
+    _hydrated: false,
   }),
 
   getters: {
@@ -76,12 +78,18 @@ export const usePlannerStore = defineStore('planner', {
     },
 
     persist() {
-      sessionSave(this.project)
+      if (!this._hydrated) return
+      storageSaveDebounced(this.project)
     },
 
-    restoreSession() {
-      const saved = sessionLoad()
-      if (saved) this.project = saved
+    /** 从宿主存储恢复上次方案（应用重启后数据仍在）。 */
+    async restoreSession() {
+      try {
+        const saved = await storageLoad()
+        if (saved) this.project = saved
+      } finally {
+        this._hydrated = true
+      }
     },
 
     // ---- 时间结构 ----

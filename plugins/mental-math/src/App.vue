@@ -1,5 +1,6 @@
 <script setup>
-import { ref, reactive, computed, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { toolbox } from '@toolbox/plugin-sdk'
 import { generatePapers, validateOptions } from './mentalMath.js'
 import WorksheetTab from './WorksheetTab.vue'
 
@@ -19,6 +20,32 @@ const config = reactive({
   count: 10,
   mixed: false,
   division: 'exact', // 'exact' 整除 | 'remainder' 有余数
+})
+
+// —— 配置持久化（宿主 storage）：重启后保留 ——
+const CONFIG_KEY = 'practiceConfig'
+let configHydrated = false
+const OPS = ['+', '-', '*', '/']
+
+onMounted(async () => {
+  try {
+    const saved = await toolbox.storageGet(CONFIG_KEY)
+    if (saved && typeof saved === 'object') {
+      if (Array.isArray(saved.ops) && saved.ops.length) {
+        config.ops = saved.ops.filter((o) => OPS.includes(o))
+      }
+      for (const k of ['lo', 'hi', 'resultMin', 'resultMax', 'count']) {
+        if (Number.isFinite(saved[k]) && saved[k] > 0) config[k] = saved[k]
+      }
+      if (typeof saved.mixed === 'boolean') config.mixed = saved.mixed
+      if (saved.division === 'exact' || saved.division === 'remainder') config.division = saved.division
+    }
+  } catch {}
+  configHydrated = true
+})
+watch(config, () => {
+  if (!configHydrated) return
+  toolbox.storageSet(CONFIG_KEY, { ...config, ops: [...config.ops] }).catch(() => {})
 })
 
 const OP_LABELS = {

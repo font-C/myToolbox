@@ -13,18 +13,21 @@ const MAX = 100
 
 const STORE_KEY = 'clipboard_history_v1'
 
-function loadStored() {
+// 持久化走宿主 storage（storage 权限）：自定义协议下 webview 的 localStorage 不可靠
+async function loadStored() {
   try {
-    const raw = localStorage.getItem(STORE_KEY)
-    if (raw) items.value = JSON.parse(raw).slice(0, MAX)
-    if (items.value.length) lastText = items.value[0].text
+    const raw = await toolbox.storageGet(STORE_KEY)
+    if (Array.isArray(raw)) {
+      items.value = raw.slice(0, MAX)
+      if (items.value.length) lastText = items.value[0].text
+    }
   } catch {
-    // 自定义协议下 localStorage 可能不可用：仅保留会话内历史
+    // 宿主存储不可用（旧版本宿主）：仅保留会话内历史
   }
 }
-function persist() {
+async function persist() {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(items.value.slice(0, MAX)))
+    await toolbox.storageSet(STORE_KEY, items.value.slice(0, MAX))
   } catch {}
 }
 
@@ -85,8 +88,8 @@ function summary(text) {
   return one.length > 120 ? one.slice(0, 120) + '…' : one || '（空白）'
 }
 
-onMounted(() => {
-  loadStored()
+onMounted(async () => {
+  await loadStored()
   start()
 })
 onUnmounted(stop)
@@ -131,7 +134,7 @@ onUnmounted(stop)
         </li>
       </ul>
 
-      <p class="privacy">🔒 历史仅保存在本机浏览器存储中，关闭窗口即停止记录；不会上传任何内容。</p>
+      <p class="privacy">🔒 历史仅保存在本机（宿主应用数据目录），重启应用后仍在；不会上传任何内容。</p>
     </main>
   </div>
 </template>

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { toolbox, useNativeFileDrop } from '@toolbox/plugin-sdk'
 import * as OpenCC from 'opencc-js'
 import { pinyin } from 'pinyin-pro'
@@ -16,6 +16,29 @@ const ccFrom = ref('cn')
 const ccTo = ref('twp')
 // 拼音样式
 const pyTone = ref('symbol') // symbol | num | none
+
+// —— 设置持久化（宿主 storage）：重启后保留 ——
+const SETTINGS_KEY = 'settings'
+let hydrated = false
+onMounted(async () => {
+  try {
+    const saved = await toolbox.storageGet(SETTINGS_KEY)
+    if (saved && typeof saved === 'object') {
+      if (typeof saved.ccFrom === 'string') ccFrom.value = saved.ccFrom
+      if (typeof saved.ccTo === 'string') ccTo.value = saved.ccTo
+      if (['symbol', 'num', 'none'].includes(saved.pyTone)) pyTone.value = saved.pyTone
+    }
+  } catch {}
+  hydrated = true
+})
+watch([ccFrom, ccTo, pyTone], () => {
+  if (!hydrated) return
+  toolbox.storageSet(SETTINGS_KEY, {
+    ccFrom: ccFrom.value,
+    ccTo: ccTo.value,
+    pyTone: pyTone.value,
+  }).catch(() => {})
+})
 
 const stats = computed(() => {
   const s = input.value

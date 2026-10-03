@@ -1,7 +1,7 @@
 /**
  * 方案持久化与导入导出。
- * - 方案文件：JSON（经 broker 对话框 + 授权读写，自定义协议下 localStorage 不可靠）
- * - 会话防丢：sessionStorage 尽力而为（try/catch）
+ * - 持久化：宿主 storage KV（storage 权限，落宿主 appData，重启不丢；写穿透 + 500ms 防抖）
+ * - 方案文件：JSON（经 broker 对话框 + 授权读写）
  * - 导出：xlsx（SheetJS）/ CSV（UTF-8 BOM）
  * - 导入：粘贴文本解析（教师/班级/科目/任务）
  */
@@ -9,23 +9,46 @@ import * as XLSX from 'xlsx'
 import { toolbox } from '@toolbox/plugin-sdk'
 import { emptyProject, guessSubjectProps, DEFAULT_RULES } from './solver/model.js'
 
-const SESSION_KEY = 'course-scheduler.session'
+const STORAGE_KEY = 'project'
 
-// ---------- 会话缓存（尽力而为） ----------
+// ---------- 宿主存储（持久化） ----------
 
-export function sessionSave(project) {
+/** 立即写入宿主存储（storage 权限）。失败静默：旧宿主/浏览器模式下不可用。 */
+export async function storageSave(project) {
   try {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(project))
+    const payload = JSON.parse(serializeProject(project))
+    await toolbox.storageSet(STORAGE_KEY, payload)
   } catch {
-    /* 自定义协议下可能不可用，忽略 */
+    /* 存储不可用时静默降级 */
   }
 }
 
-export function sessionLoad() {
+let _pending = null
+let _saveTimer = null
+
+/** 防抖写入（500ms）：编辑操作密集时合并落盘。 */
+export function storageSaveDebounced(project) {
+  _pending = project
+  clearTimeout(_saveTimer)
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null
+    storageSave(_pending)
+  }, 500)
+}
+
+/** 立即落盘待写内容（窗口关闭/隐藏前调用，防最后几百毫秒的编辑丢失）。 */
+export function storageFlushPending() {
+  clearTimeout(_saveTimer)
+  _saveTimer = null
+  if (_pending) storageSave(_pending)
+}
+
+/** 从宿主存储恢复；无数据或不可用时返回 null。 */
+export async function storageLoad() {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY)
-    if (!raw) return null
-    return normalizeProject(JSON.parse(raw))
+    const raw = await toolbox.storageGet(STORAGE_KEY)
+    if (raw == null) return null
+    return normalizeProject(raw)
   } catch {
     return null
   }
@@ -328,18 +351,25 @@ export function parseAssignments(text, project) {
       errors.push(`第 ${i + 1} 行：找不到班级「${clsName}」`)
       return
     }
+    const teacher = teacherByName.get(teacherName)
+    if (!teacher) {
+      errors.push(`第 ${i + 1} 行：找不到教师「${teacherName}」`)
+      return
+    }
+    const periods = Number(periodsRaw)
+    const mkItem = (subj) => ({
+      classId: cls.id,
+      subjectId: subj.id,
+      teacherId: teacher.id,
+      periods: Number.isFinite(periods) && periods > 0 ? Math.round(periods) : subj.weekly,
+    })
     const subj = subjByName.get(subjName)
     if (subj && subj.gradeId && subj.gradeId !== cls.gradeId) {
       // 同名科目按年级区分：优先取与该班年级匹配（或全局）的那一个
       const matched = project.subjects.find(
         (s) => s.name === subjName && (!s.gradeId || s.gradeId === cls.gradeId)
       )
-      if (matched) items.push({
-        classId: cls.id,
-        subjectId: matched.id,
-        teacherId: teacher.id,
-        periods: Number.isFinite(periods) && periods > 0 ? Math.round(periods) : matched.weekly,
-      })
+      if (matched) items.push(mkItem(matched))
       else errors.push(`第 ${i + 1} 行：科目「${subjName}」不适用于班级「${clsName}」的年级`)
       return
     }
@@ -347,18 +377,7 @@ export function parseAssignments(text, project) {
       errors.push(`第 ${i + 1} 行：找不到科目「${subjName}」`)
       return
     }
-    const teacher = teacherByName.get(teacherName)
-    if (!teacher) {
-      errors.push(`第 ${i + 1} 行：找不到教师「${teacherName}」`)
-      return
-    }
-    const periods = Number(periodsRaw)
-    items.push({
-      classId: cls.id,
-      subjectId: subj.id,
-      teacherId: teacher.id,
-      periods: Number.isFinite(periods) && periods > 0 ? Math.round(periods) : subj.weekly,
-    })
+    items.push(mkItem(subj))
   })
   return { items, errors }
 }

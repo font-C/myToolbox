@@ -4,7 +4,7 @@
   "name": "智能排课",
   "description": "班级·教师·科目一体化自动排课：体育/早晨/作文等规则可配，冲突检测与手动调课，导出课表",
   "author": "Font_C",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "apiVersion": 1,
   "entry": "index.html",
   "icon": "icon.png",
@@ -12,7 +12,8 @@
     "dialog:open",
     "dialog:save",
     "fs:read",
-    "fs:write"
+    "fs:write",
+    "storage"
   ],
   "window": {
     "title": "智能排课 · 工具箱",
