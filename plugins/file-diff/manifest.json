@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "id": "file-diff",
+  "name": "文件对比",
+  "description": "双页签：文本对比（文本/文件/目录逐文件行级差异，就地展开原新内容）与文件对比（SHA-256 校验一致性、目录树+判定面板），全离线",
+  "author": "Font_C",
+  "version": "0.6.2",
+  "apiVersion": 1,
+  "minHostVersion": "0.4.0",
+  "entry": "index.html",
+  "icon": "icon.png",
+  "permissions": [
+    "dialog:open",
+    "fs:read",
+    "dialog:save",
+    "fs:write",
+    "clipboard:write"
+  ],
+  "window": {
+    "title": "文件对比 · 工具箱",
+    "width": 1160,
+    "height": 800,
+    "minWidth": 720,
+    "minHeight": 560
+  }
+}

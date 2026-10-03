@@ -169,6 +169,21 @@ const G = {
       <circle cx="152" cy="158" r="10" fill="#0f172a"/>
       <circle cx="184" cy="158" r="10" fill="#0f172a"/>
     </g>`,
+  // 文件对比：两张文件卡片，左减右加
+  fileDiff: `
+    <rect x="28" y="48" width="84" height="144" rx="12" fill="#fff"/>
+    <rect x="128" y="48" width="84" height="144" rx="12" fill="#fff"/>
+    <g fill="#0f172a" fill-opacity="0.72">
+      <rect x="49" y="70" width="42" height="14" rx="7"/>
+      <rect x="45" y="102" width="50" height="12" rx="6"/>
+      <rect x="45" y="126" width="50" height="12" rx="6"/>
+      <rect x="45" y="150" width="34" height="12" rx="6"/>
+      <rect x="149" y="70" width="42" height="14" rx="7"/>
+      <rect x="164" y="56" width="14" height="42" rx="7"/>
+      <rect x="145" y="102" width="50" height="12" rx="6"/>
+      <rect x="145" y="126" width="50" height="12" rx="6"/>
+      <rect x="161" y="150" width="34" height="12" rx="6"/>
+    </g>`,
 }
 
 // 每个插件：渐变配色 + 图形组合
@@ -189,6 +204,7 @@ const ICONS = {
   'gif-maker': { from: '#7e22ce', to: '#c084fc', body: G.gifMaker },
   'pic-merge': { from: '#0369a1', to: '#38bdf8', body: G.picMerge },
   'course-scheduler': { from: '#1e3a8a', to: '#3b82f6', body: G.scheduler },
+  'file-diff': { from: '#3f6212', to: '#a3e635', body: G.fileDiff },
 }
 
 function svgFor(id) {
