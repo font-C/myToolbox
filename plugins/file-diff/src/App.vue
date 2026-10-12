@@ -4,6 +4,7 @@ import { toolbox, useNativeFileDrop } from '@toolbox/plugin-sdk'
 import { splitLines, diffRegions, buildSideRows, buildUnifiedRows, toUnifiedDiff } from './diffcore.js'
 import { buildDirTree, defaultExpanded, collectDirRels } from './dirtree.js'
 import { sha256Hex } from './hash.js'
+import { isWordFile, extractWordText } from './officeExtract.js'
 import DiffRows from './DiffRows.vue'
 import DirTree from './DirTree.vue'
 import FileVerdict from './FileVerdict.vue'
@@ -321,7 +322,10 @@ async function applyFile(side, { name, bytes }) {
   if (bytes.length > MAX_TEXT_BYTES) {
     throw new Error(`文件过大（${fmtSize(bytes.length)}），文本对比仅支持 16MB 以内`)
   }
-  const { text, encoding } = decodeBytes(bytes)
+  // Word 文档（.doc/.docx）先提取纯文本再对比，其余走 UTF-8/GBK 解码
+  const { text, encoding } = isWordFile(name)
+    ? await extractWordText(bytes, name)
+    : decodeBytes(bytes)
   sides[side] = { kind: 'text', text, file: { name, encoding, size: bytes.length }, dir: null }
 }
 
@@ -531,6 +535,20 @@ const DIR_STATUS = {
   same: { label: '相同', cls: 'b--same' },
 }
 
+/** 计算两段文本的行级差异增删统计（目录对比逐文件分析用）；归一后无差异视为相同 */
+function textDiffStats(lText, rText) {
+  const a = splitLines(lText)
+  const b = splitLines(rText)
+  const d = diffRegions(a.lines, b.lines, {
+    ignoreWhitespace: optIgnoreWs.value,
+    ignoreCase: optIgnoreCase.value,
+    oldNoEol: a.noEol,
+    newNoEol: b.noEol,
+  })
+  if (d.stats.hunks === 0) return { status: 'same', plus: 0, minus: 0 }
+  return { status: 'diff', plus: d.stats.added + d.stats.modified, minus: d.stats.removed + d.stats.modified }
+}
+
 async function analyzeCommonFile(rel, sizeL, sizeR, rootL, rootR) {
   try {
     if (Math.max(sizeL, sizeR) > MAX_COMPARE_BYTES) {
@@ -542,22 +560,16 @@ async function analyzeCommonFile(rel, sizeL, sizeR, rootL, rootR) {
       toolbox.readGranted(joinPath(rootR, rel)),
     ])
     if (bytesEqual(lb, rb)) return { status: 'same', plus: 0, minus: 0 }
+    // Word 文档：提取纯文本参与行级差异（提取失败走外层 catch → binary）
+    const base = rel.split(/[\\/]/).pop()
+    if (isWordFile(base)) {
+      const [lw, rw] = await Promise.all([extractWordText(lb, base), extractWordText(rb, base)])
+      return textDiffStats(lw.text, rw.text)
+    }
     if (isBinaryBytes(lb) || isBinaryBytes(rb)) return { status: 'binary', plus: null, minus: null }
     const l = decodeBytes(lb)
     const r = decodeBytes(rb)
-    const a = splitLines(l.text)
-    const b = splitLines(r.text)
-    const d = diffRegions(a.lines, b.lines, {
-      ignoreWhitespace: optIgnoreWs.value,
-      ignoreCase: optIgnoreCase.value,
-      oldNoEol: a.noEol,
-      newNoEol: b.noEol,
-    })
-    return {
-      status: 'diff',
-      plus: d.stats.added + d.stats.modified,
-      minus: d.stats.removed + d.stats.modified,
-    }
+    return textDiffStats(l.text, r.text)
   } catch {
     return { status: 'binary', plus: null, minus: null }
   }
@@ -668,6 +680,12 @@ function collapseAllDirs() {
 }
 
 // ---------- 文本页目录模式：就地展开选中文件的文本差异 ----------
+// 读取单侧文件内容：Word 文档提取文本，其余按编码解码
+async function readSideText(path, rel) {
+  const bytes = await toolbox.readGranted(path)
+  return isWordFile(rel) ? await extractWordText(bytes, rel) : decodeBytes(bytes)
+}
+
 // 单侧文件（仅原=整文件删除，仅新=整文件新增）读取存在的一侧，缺侧为空文本
 async function openDirFile(row) {
   error.value = ''
@@ -677,18 +695,16 @@ async function openDirFile(row) {
     let lEnc = ''
     let rEnc = ''
     if (row.status === 'onlyL') {
-      const d = decodeBytes(await toolbox.readGranted(joinPath(dirResult.value.rootL, row.rel)))
+      const d = await readSideText(joinPath(dirResult.value.rootL, row.rel), row.rel)
       lText = d.text
       lEnc = d.encoding
     } else if (row.status === 'onlyR') {
-      const d = decodeBytes(await toolbox.readGranted(joinPath(dirResult.value.rootR, row.rel)))
+      const d = await readSideText(joinPath(dirResult.value.rootR, row.rel), row.rel)
       rText = d.text
       rEnc = d.encoding
     } else {
-      const lb = await toolbox.readGranted(joinPath(dirResult.value.rootL, row.rel))
-      const rb = await toolbox.readGranted(joinPath(dirResult.value.rootR, row.rel))
-      const l = decodeBytes(lb)
-      const r = decodeBytes(rb)
+      const l = await readSideText(joinPath(dirResult.value.rootL, row.rel), row.rel)
+      const r = await readSideText(joinPath(dirResult.value.rootR, row.rel), row.rel)
       lText = l.text
       rText = r.text
       lEnc = l.encoding
@@ -929,7 +945,7 @@ function toggleByKeyboard() {
   <div class="page" @keydown.ctrl.enter="toggleByKeyboard" @keydown.meta.enter="toggleByKeyboard">
     <header class="header">
       <h1>文件对比</h1>
-      <p class="header__sub">文本对比：行级差异并排查看 · 文件对比：SHA-256 校验一致性、目录树状对比 · 全部本地处理</p>
+      <p class="header__sub">文本对比：行级差异并排查看（支持 .doc/.docx）· 文件对比：SHA-256 校验一致性、目录树状对比 · 全部本地处理</p>
     </header>
 
     <main class="body">
@@ -1014,7 +1030,7 @@ function toggleByKeyboard() {
         <section v-if="paneState === 'edit' && !sides.left.text && !sides.right.text && !sides.left.dir && !sides.right.dir" class="empty">
           <p>① 每侧可粘贴文本、选择文件或选择目录（支持拖进窗口）</p>
           <p>② 两侧都是目录 → 按目录+文件名逐个对比文本内容，点击文件就地展开差异；否则比较文本内容（Ctrl/⌘ + Enter）</p>
-          <p class="empty__hint">UTF-8 / GBK 自动识别 · 行内差异高亮 · 可导出 git 补丁与 HTML 报告 · 只判断文件是否一致请切到「文件对比」页</p>
+          <p class="empty__hint">UTF-8 / GBK 自动识别 · Word 文档（.doc/.docx）提取文本对比 · 行内差异高亮 · 可导出 git 补丁与 HTML 报告 · 只判断文件是否一致请切到「文件对比」页</p>
         </section>
 
         <!-- 对比态：原位差异 -->

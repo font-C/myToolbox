@@ -72,8 +72,10 @@ defineEmits(['expand'])
 </template>
 
 <style scoped>
-.diff { flex: 1; border: 1px solid var(--c-border); border-radius: 10px; background: var(--c-surface); overflow: hidden; }
-.diff__cols { display: flex; border-bottom: 1px solid var(--c-border); background: #f8fafc; }
+/* .diff 在 flex 父容器中占满剩余空间；正文区独立滚动，表头吸顶 */
+.diff { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--c-border); border-radius: 10px; background: var(--c-surface); overflow: hidden; }
+.diff__cols { flex: none; display: flex; border-bottom: 1px solid var(--c-border); background: #f8fafc; }
+.diff__body { flex: 1; min-height: 0; overflow-y: auto; }
 .diff__colhead {
   flex: 1; min-width: 0; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--c-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

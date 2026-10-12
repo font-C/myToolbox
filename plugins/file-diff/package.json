@@ -10,7 +10,14 @@
   "dependencies": {
     "@toolbox/plugin-sdk": "^1.0.0",
     "vue": "^3.5.13",
-    "diff": "^8.0.0"
+    "diff": "^8.0.0",
+    "mammoth": "^1.13.0",
+    "word-extractor": "^1.0.4",
+    "buffer": "^6.0.3",
+    "events": "^3.3.0",
+    "readable-stream": "^4.7.0",
+    "util": "^0.12.5",
+    "path-browserify": "^1.0.1"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",

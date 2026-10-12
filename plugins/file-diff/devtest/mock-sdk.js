@@ -7,6 +7,22 @@
 const DIR_L = '/test/原目录'
 const DIR_R = '/test/新目录'
 
+const enc = new TextEncoder()
+
+// Word 文档 fixtures（.doc/.docx 提取文本对比测试）：报告A 与 报告B 正文有一处差异
+import { DOCX_A_B64, DOCX_B_B64, DOC_A_B64 } from './fixtures.js'
+
+function b64ToBytes(b64) {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+const WORD_A_DOCX = b64ToBytes(DOCX_A_B64)
+const WORD_B_DOCX = b64ToBytes(DOCX_B_B64)
+const WORD_A_DOC = b64ToBytes(DOC_A_B64)
+
 const DIRS = {
   [DIR_L]: {
     entries: [
@@ -16,6 +32,7 @@ const DIRS = {
       { path: 'notes.txt', size: 50 },
       { path: 'src/App.vue', size: 900 },
       { path: 'src/util.js', size: 400 },
+      { path: '报告.docx', size: WORD_A_DOCX.length },
     ],
     truncated: false,
   },
@@ -26,12 +43,11 @@ const DIRS = {
       { path: 'docs/new.md', size: 220 },
       { path: 'src/App.vue', size: 980 },
       { path: 'src/util.js', size: 400 },
+      { path: '报告.docx', size: WORD_B_DOCX.length },
     ],
     truncated: false,
   },
 }
-
-const enc = new TextEncoder()
 const FILES = {
   [DIR_L + '/README.md']: enc.encode('# 项目\n\n说明文本，两侧一致。\n'),
   [DIR_R + '/README.md']: enc.encode('# 项目\n\n说明文本，两侧一致。\n'),
@@ -44,6 +60,12 @@ const FILES = {
   [DIR_L + '/docs/guide.md']: enc.encode('# 指南\n\n仅原目录有此文件。\n'),
   [DIR_R + '/docs/new.md']: enc.encode('# 新文档\n\n仅新目录有此文件。\n'),
   [DIR_L + '/notes.txt']: enc.encode('仅原目录的便签\n'),
+  // Word 文档：提取文本后对比（报告A/B 正文有一处差异；两侧报告.docx 内容不同）
+  '/test/报告A.docx': WORD_A_DOCX,
+  '/test/报告B.docx': WORD_B_DOCX,
+  '/test/报告A.doc': WORD_A_DOC,
+  [DIR_L + '/报告.docx']: WORD_A_DOCX,
+  [DIR_R + '/报告.docx']: WORD_B_DOCX,
   // 含 NUL 字节 → 走二进制分支；两侧内容不同
   [DIR_L + '/assets/logo.png']: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]),
   [DIR_R + '/assets/logo.png']: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 9, 9, 9, 9]),
@@ -52,8 +74,18 @@ const FILES = {
   '/test/文件B.bin': new Uint8Array([1, 2, 4]),
 }
 
-// pickOpenFile 调用顺序：A, B, A, A, A, B, …（测试「不一致」与「一致」两种判定）
-const PICK_SEQ = ['/test/文件A.bin', '/test/文件B.bin', '/test/文件A.bin', '/test/文件A.bin']
+// pickOpenFile 调用顺序（按 UI 操作脚本消耗）：
+// 文本页：报告A.docx → 报告B.docx（docx 对比）→ 报告A.doc（doc 对比）
+// 文件页：文件A.bin → 文件B.bin → 文件A.bin（「不一致」与「一致」两种判定）
+const PICK_SEQ = [
+  '/test/报告A.docx',
+  '/test/报告B.docx',
+  '/test/报告A.doc',
+  '/test/文件A.bin',
+  '/test/文件B.bin',
+  '/test/文件A.bin',
+  '/test/文件A.bin',
+]
 let fileSeq = 0
 let pickSeq = 0
 
