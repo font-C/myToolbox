@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { toolbox } from '@toolbox/plugin-sdk'
 import { useNativeFileDrop } from '@toolbox/plugin-sdk'
 import { zipSync } from 'fflate'
@@ -18,8 +18,8 @@ const fileInput = ref(null)
 
 // 全局设置（弹框「好」后生效）
 const settings = reactive({
-  format: 'image/jpeg', // image/jpeg | image/png | image/webp
-  quality: 75,
+  format: 'image/jpeg', // image/jpeg | image/png
+  targetSize: 500 * 1024, // 目标输出体积（JPEG：二分质量逼近，分辨率不变）
   resize: { unit: 'px', w: 0, h: 0, lock: true, resValue: 28.35, resUnit: 'cm', resample: true },
   watermark: { enabled: false, text: '© 我的水印', size: 28, opacity: 40, pos: 'br', color: '#ffffff' },
 })
@@ -37,8 +37,8 @@ onMounted(async () => {
   try {
     const saved = await toolbox.storageGet(SETTINGS_KEY)
     if (saved && typeof saved === 'object') {
-      if (['image/jpeg', 'image/png', 'image/webp'].includes(saved.format)) settings.format = saved.format
-      if (Number.isFinite(saved.quality)) settings.quality = Math.min(100, Math.max(1, saved.quality))
+      if (['image/jpeg', 'image/png'].includes(saved.format)) settings.format = saved.format
+      if (Number.isFinite(saved.targetSize)) settings.targetSize = Math.min(50 * 1024 * 1024, Math.max(TARGET_MIN, saved.targetSize))
       if (saved.resize && typeof saved.resize === 'object') Object.assign(settings.resize, saved.resize)
       if (saved.watermark && typeof saved.watermark === 'object') Object.assign(settings.watermark, saved.watermark)
     }
@@ -54,9 +54,30 @@ watch(
   { deep: true }
 )
 
-const extOf = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
-const formatNames = { 'image/jpeg': 'JPEG', 'image/png': 'PNG', 'image/webp': 'WebP' }
+const extOf = { 'image/jpeg': 'jpg', 'image/png': 'png' }
+const formatNames = { 'image/jpeg': 'JPEG', 'image/png': 'PNG' }
 const unitNames = { px: '像素', mm: '毫米', cm: '厘米', in: '英寸' }
+
+// —— 目标体积（滑块对数刻度：200KB → max(2MB, 最大原图体积)）——
+const TARGET_MIN = 200 * 1024
+const targetMax = computed(() => {
+  const biggest = files.value.reduce((m, f) => Math.max(m, f.bytes?.length || 0), 0)
+  return Math.max(2 * 1024 * 1024, biggest)
+})
+function sliderToTarget(v) {
+  const max = Math.max(targetMax.value, TARGET_MIN * 2)
+  const raw = TARGET_MIN * Math.pow(max / TARGET_MIN, v / 100)
+  const step = raw < 1024 * 1024 ? 20 * 1024 : 100 * 1024
+  return Math.min(max, Math.max(TARGET_MIN, Math.round(raw / step) * step))
+}
+function targetToSlider(t) {
+  const max = Math.max(targetMax.value, TARGET_MIN * 2)
+  const v = Math.min(Math.max(Number(t) || TARGET_MIN, TARGET_MIN), max)
+  return Math.round((Math.log(v / TARGET_MIN) / Math.log(max / TARGET_MIN)) * 100)
+}
+function fmtTarget(n) {
+  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`
+}
 
 function fmtSize(n) {
   if (n === undefined || n === null) return ''
@@ -189,19 +210,35 @@ function computeTarget(cfg, item) {
   const wv = Number(cfg.w) || 0
   const hv = Number(cfg.h) || 0
   if (unit === 'px') {
-    const w = Math.max(1, Math.round(wv))
-    const h = cfg.lock ? Math.max(1, Math.round((w * srcH) / srcW)) : Math.max(1, Math.round(hv))
+    // 未配置尺寸：保持原尺寸（processOne 回退到解码后的原图宽高）
+    if (!wv && !hv) return { w: 0, h: 0, dpi: null, resample: true }
+    if (!cfg.lock) {
+      return { w: Math.max(1, Math.round(wv)), h: Math.max(1, Math.round(hv)), dpi: null, resample: true }
+    }
+    // 锁定比例：默认以宽为准，仅填了高时以高反推；源尺寸未知时交给 processOne 按解码结果补齐
+    const ratio = srcW > 0 && srcH > 0 ? srcW / srcH : 0
+    let w = Math.round(wv)
+    let h = 0
+    if (w > 0) {
+      h = ratio ? Math.max(1, Math.round(w / ratio)) : 0
+    } else {
+      h = Math.max(1, Math.round(hv))
+      w = ratio ? Math.max(1, Math.round(h * ratio)) : 0
+    }
     return { w, h, dpi: null, resample: true }
   }
   const dpi = dpiPerInch(cfg)
-  const wPx = targetPx(wv, unit, cfg)
   const dpiOut = Math.round(dpi)
   if (!cfg.resample) {
     // 仅改 DPI：像素保持原样，打印尺寸 = 像素 / 新DPI
     return { w: srcW, h: srcH, dpi: dpiOut, resample: false }
   }
-  const w = wPx
-  const h = cfg.lock ? Math.max(1, Math.round((w * srcH) / srcW)) : Math.max(1, targetPx(hv, unit, cfg))
+  // 未填宽：保持原像素尺寸，仅写入 DPI 元数据
+  if (!wv) {
+    return { w: srcW, h: srcH, dpi: dpiOut, resample: true }
+  }
+  const w = targetPx(wv, unit, cfg)
+  const h = cfg.lock ? (srcW > 0 ? Math.max(1, Math.round((w * srcH) / srcW)) : 0) : Math.max(1, targetPx(hv, unit, cfg))
   return { w, h, dpi: dpiOut, resample: true }
 }
 
@@ -275,6 +312,57 @@ function drawWatermark(ctx, w, h, wm) {
   ctx.globalAlpha = 1
 }
 
+// ---------- 水印预览（叠加在预览图上的透明画布） ----------
+const previewAreaRef = ref(null)
+const previewImgRef = ref(null)
+const wmCanvasRef = ref(null)
+let wmRo = null
+
+function syncWmPreview() {
+  const img = previewImgRef.value
+  const cv = wmCanvasRef.value
+  const area = previewAreaRef.value
+  const item = current.value
+  if (!img || !cv || !area || !item) return
+  const wm = settings.watermark
+  // 仅改 DPI 时不重编码，输出不含水印，预览也要隐藏
+  const resample = computeTarget(settings.resize, item).resample
+  const show = !!(wm.enabled && wm.text.trim() && view.value === 'preview' && img.naturalWidth && resample)
+  if (!show) {
+    cv.style.display = 'none'
+    return
+  }
+  const ar = area.getBoundingClientRect()
+  const ir = img.getBoundingClientRect()
+  const dispW = Math.max(1, Math.round(ir.width))
+  const dispH = Math.max(1, Math.round(ir.height))
+  cv.style.display = 'block'
+  cv.style.left = `${ir.left - ar.left}px`
+  cv.style.top = `${ir.top - ar.top}px`
+  cv.style.width = `${dispW}px`
+  cv.style.height = `${dispH}px`
+  const dpr = Math.min(2, window.devicePixelRatio || 1)
+  const cw = Math.max(1, Math.round(dispW * dpr))
+  const ch = Math.max(1, Math.round(dispH * dpr))
+  if (cv.width !== cw || cv.height !== ch) {
+    cv.width = cw
+    cv.height = ch
+  }
+  const ctx = cv.getContext('2d')
+  ctx.clearRect(0, 0, cw, ch)
+  drawWatermark(ctx, cw, ch, wm)
+}
+
+onMounted(() => {
+  wmRo = new ResizeObserver(() => syncWmPreview())
+  if (previewAreaRef.value) wmRo.observe(previewAreaRef.value)
+})
+onUnmounted(() => {
+  wmRo?.disconnect()
+  wmRo = null
+})
+watch([current, view, () => settings.watermark, () => settings.resize], () => nextTick(syncWmPreview), { deep: true })
+
 // ---------- 处理 ----------
 async function processOne(item) {
   const t = computeTarget(settings.resize, item)
@@ -286,7 +374,7 @@ async function processOne(item) {
     const isJpgSrc = /\.jpe?g$/i.test(item.name)
     const isPngSrc = /\.png$/i.test(item.name)
     const sameType = (isJpgSrc && settings.format === 'image/jpeg') || (isPngSrc && settings.format === 'image/png')
-    if (settings.format === 'image/webp' || !sameType) {
+    if (!sameType) {
       return { name: outName, bytes: item.bytes, origSize: item.bytes.length, skippedOnly: '仅改 DPI 需输出格式与原图一致（JPEG/PNG），或改用「重新采样」' }
     }
     const patched = settings.format === 'image/jpeg' ? jpegSetDpi(item.bytes, t.dpi) : pngSetDpi(item.bytes, t.dpi)
@@ -308,6 +396,10 @@ async function processOne(item) {
 
   let w = t.w || img.width
   let h = t.h || img.height
+  // 锁定比例但源尺寸未知时，用解码后的实际比例补齐高度
+  if (t.w && !t.h && settings.resize.lock) {
+    h = Math.max(1, Math.round((w * img.height) / img.width))
+  }
   if (Math.max(w, h) > 8192) throw new Error('TOO_BIG')
 
   const canvas = document.createElement('canvas')
@@ -321,21 +413,55 @@ async function processOne(item) {
   ctx.drawImage(img, 0, 0, w, h)
   drawWatermark(ctx, w, h, settings.watermark)
 
-  const blob = await new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error('ENCODE_FAIL'))),
-      settings.format,
-      settings.format === 'image/png' ? undefined : settings.quality / 100,
-    )
-  })
-  let bytes = new Uint8Array(await blob.arrayBuffer())
+  const encode = (q) =>
+    new Promise((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('ENCODE_FAIL'))), settings.format, q)
+    })
+
+  let bytes
+  let note = ''
+  if (settings.format !== 'image/png' && settings.targetSize) {
+    // 目标体积模式：二分质量逼近目标，分辨率保持不变
+    const MIN_Q = 10
+    const MAX_Q = 100
+    const smallest = await encode(MIN_Q / 100)
+    if (smallest.size <= settings.targetSize) {
+      let okQ = MIN_Q
+      let okBlob = smallest
+      let lo = MIN_Q + 1
+      let hi = MAX_Q
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1
+        const b = await encode(mid / 100)
+        if (b.size <= settings.targetSize) {
+          okQ = mid
+          okBlob = b
+          lo = mid + 1
+        } else {
+          hi = mid - 1
+        }
+      }
+      bytes = new Uint8Array(await okBlob.arrayBuffer())
+      note = `目标 ${fmtTarget(settings.targetSize)} · 质量 ${okQ}%`
+    } else {
+      bytes = new Uint8Array(await smallest.arrayBuffer())
+      note = `目标 ${fmtTarget(settings.targetSize)} 未达（已用最低质量 ${MIN_Q}%）`
+    }
+  } else {
+    const blob = await encode(undefined)
+    bytes = new Uint8Array(await blob.arrayBuffer())
+  }
   // 物理尺寸模式：把分辨率写进文件元数据（像素 / 物理 = 设定值）
   if (t.dpi) {
     const patched =
       settings.format === 'image/jpeg' ? jpegSetDpi(bytes, t.dpi) : settings.format === 'image/png' ? pngSetDpi(bytes, t.dpi) : null
     if (patched) bytes = patched
   }
-  return { name: outName, bytes, origSize: item.bytes.length, w, h }
+  // 压缩后反而更大：直接返回原图
+  if (item.bytes.length && bytes.length >= item.bytes.length) {
+    return { name: item.name, bytes: item.bytes, origSize: item.bytes.length, w: item.w || 0, h: item.h || 0, keptOriginal: true }
+  }
+  return { name: outName, bytes, origSize: item.bytes.length, w, h, note }
 }
 
 async function run() {
@@ -423,7 +549,7 @@ async function saveOne(r) {
       <template v-if="view === 'preview' && files.length">
         <div class="seg">
           <button
-            v-for="f in ['image/jpeg', 'image/png', 'image/webp']"
+            v-for="f in ['image/jpeg', 'image/png']"
             :key="f"
             type="button"
             class="segbtn"
@@ -434,8 +560,17 @@ async function saveOne(r) {
           </button>
         </div>
         <div v-if="settings.format !== 'image/png'" class="quality">
-          质量 {{ settings.quality }}%
-          <input v-model.number="settings.quality" type="range" min="30" max="100" step="5" class="qslider" />
+          目标 {{ fmtTarget(settings.targetSize) }}
+          <input
+            :value="targetToSlider(settings.targetSize)"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            class="qslider"
+            @input="settings.targetSize = sliderToTarget(+$event.target.value)"
+          />
+          <span class="quality__hint">保持原分辨率</span>
         </div>
         <button type="button" class="toolbtn" @click="openResize">
           📐 调整大小<span class="toolbtn__sub">{{ resizeSummary }}</span>
@@ -464,13 +599,15 @@ async function saveOne(r) {
     <div v-if="view === 'preview'" class="previewwrap">
       <template v-if="files.length">
         <div
+          ref="previewAreaRef"
           class="previewarea"
           :class="{ 'previewarea--drag': dragging }"
           @dragover.prevent="dragging = true"
           @dragleave="dragging = false"
           @drop.prevent="((dragging = false), addFiles($event.dataTransfer?.files))"
         >
-          <img v-if="current" :src="current.url" class="previewimg" alt="" />
+          <img v-if="current" ref="previewImgRef" :src="current.url" class="previewimg" alt="" @load="syncWmPreview" />
+          <canvas v-if="current" ref="wmCanvasRef" class="wmcanvas" />
           <div v-if="current" class="previewmeta">
             {{ currentIdx + 1 }} / {{ files.length }} · {{ current.name }}
             <span v-if="current.w">· {{ current.w }} × {{ current.h }} px</span>
@@ -513,13 +650,15 @@ async function saveOne(r) {
       <ul class="result__list">
         <li v-for="(r, i) in results" :key="r.name + i" class="result__item">
           <span class="result__name">{{ r.name }}</span>
-          <span class="result__size" :class="{ good: !r.skippedOnly && r.bytes.length < r.origSize }">
+          <span class="result__size" :class="{ good: !r.skippedOnly && !r.keptOriginal && r.bytes.length < r.origSize }">
             {{
               r.skippedOnly
                 ? r.skippedOnly
                 : r.dpiOnly
                   ? `${r.w}×${r.h} px · ${fmtSize(r.bytes.length)}（仅更新 DPI）`
-                  : `${r.w ? r.w + '×' + r.h + ' · ' : ''}${fmtSize(r.origSize)} → ${fmtSize(r.bytes.length)}（${r.bytes.length < r.origSize ? '-' + Math.round((1 - r.bytes.length / r.origSize) * 100) + '%' : '已是最优'}）`
+                  : r.keptOriginal
+                    ? `${r.w ? r.w + '×' + r.h + ' · ' : ''}${fmtSize(r.origSize)}（压缩未减小体积，已保留原图）`
+                    : `${r.w ? r.w + '×' + r.h + ' · ' : ''}${fmtSize(r.origSize)} → ${fmtSize(r.bytes.length)}（${r.bytes.length < r.origSize ? '-' + Math.round((1 - r.bytes.length / r.origSize) * 100) + '%' : '已是最优'}${r.note ? ' · ' + r.note : ''}）`
             }}
           </span>
           <button v-if="!r.skippedOnly" type="button" class="link" @click="saveOne(r)">另存</button>
@@ -562,9 +701,6 @@ async function saveOne(r) {
           <input v-model="resizeDraft.resample" type="checkbox" :disabled="resizeDraft.unit === 'px'" />
           重新采样图像（不勾选：像素不变，仅更新分辨率元数据）
         </label>
-        <p v-if="resizeDraft.unit !== 'px' && !resizeDraft.resample && settings.format === 'image/webp'" class="error">
-          WebP 不支持分辨率元数据：「仅改 DPI」请把输出格式切换为 JPEG 或 PNG
-        </p>
         <div class="mresult">
           <p class="mresult__pct" v-if="draftPreview">{{ draftPreview.pct }}%</p>
           <p class="mresult__size" v-if="draftPreview">
@@ -623,6 +759,7 @@ async function saveOne(r) {
   border-bottom: 1px solid var(--c-border);
 }
 .quality { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--c-text-muted); white-space: nowrap; }
+.quality__hint { font-size: 11px; opacity: 0.75; }
 .qslider { width: 110px; }
 .toolbtn {
   display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
@@ -639,9 +776,10 @@ async function saveOne(r) {
 .saved--bar { color: var(--c-text-muted); }
 
 .previewwrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.previewarea { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; padding: 16px; min-height: 0; }
+.previewarea { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; padding: 16px; min-height: 0; position: relative; }
 .previewarea--drag { outline: 2px dashed var(--c-primary); outline-offset: -8px; }
 .previewimg { max-width: 100%; max-height: calc(100% - 34px); object-fit: contain; border-radius: 6px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1); background: #fff; }
+.wmcanvas { position: absolute; pointer-events: none; display: none; }
 .previewmeta { margin-top: 10px; font-size: 12.5px; color: var(--c-text-muted); text-align: center; }
 
 .thumbsbar { display: flex; gap: 8px; padding: 10px 14px; overflow-x: auto; border-top: 1px solid var(--c-border); background: var(--c-surface); }
