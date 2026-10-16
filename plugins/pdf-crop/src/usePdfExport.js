@@ -38,7 +38,7 @@ export async function buildCroppedPdfBytes(rawBuffer, cropBoxes, pageInfos) {
     const crop = cropBoxes[srcIdx + 1]
     const info = pageInfos[srcIdx]
     if (crop && info) {
-      const box = normalizedToPdfPoints(crop, info.width, info.height)
+      const box = normalizedToPdfPoints(crop, info)
       if (box) {
         page.setMediaBox(box.x, box.y, box.width, box.height)
         page.setCropBox(box.x, box.y, box.width, box.height)

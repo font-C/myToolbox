@@ -27,22 +27,49 @@ export function normalizeCrop(raw) {
   return { x: round(nx), y: round(ny), w: round(nw), h: round(nh) }
 }
 
+/** 页面 /Rotate 归一化到 0|90|180|270（含负角，非法值按 0 处理） */
+export function normalizeRotation(deg) {
+  const r = (((Number(deg) || 0) % 360) + 360) % 360
+  return r === 90 || r === 180 || r === 270 ? r : 0
+}
+
 /**
- * 归一化裁剪框 -> PDF CropBox 目标坐标（原点左下、单位 pt）。
+ * 归一化裁剪框 -> PDF CropBox 目标坐标（未旋转用户空间，原点左下、单位 pt）。
+ * 框选坐标基于「应用 /Rotate 后的可见视图」，这里按旋转角逆映射回未旋转用户空间；
+ * 输出页保留原 /Rotate，查看器旋转后即可还原出与所见一致的裁剪区域。
+ * page: { rawWidth, rawHeight, rotation } —— 未旋转尺寸 + 旋转角。
  * 返回 { x, y, width, height }；无裁剪框时返回 null。
  */
-export function normalizedToPdfPoints(crop, pageWidthPts, pageHeightPts) {
-  if (!crop) return null
-  const left = crop.x * pageWidthPts
-  const top = crop.y * pageHeightPts
-  const width = crop.w * pageWidthPts
-  const height = crop.h * pageHeightPts
-  return {
-    x: left,
-    y: pageHeightPts - top - height,
-    width,
-    height,
+export function normalizedToPdfPoints(crop, page) {
+  if (!crop || !page) return null
+  const wu = page.rawWidth
+  const hu = page.rawHeight
+  const rotation = normalizeRotation(page.rotation)
+  let box
+  if (rotation === 90) {
+    // 顺时针转 90°：可见左上 ↔ 用户空间 (x=top, y=left)
+    box = { x: crop.y * wu, y: crop.x * hu, width: crop.h * wu, height: crop.w * hu }
+  } else if (rotation === 180) {
+    // 转 180°：两轴同时翻转
+    box = {
+      x: (1 - crop.x - crop.w) * wu,
+      y: (1 - crop.y - crop.h) * hu,
+      width: crop.w * wu,
+      height: crop.h * hu,
+    }
+  } else if (rotation === 270) {
+    // 逆时针转 90°（顺时针 270°）：与 90° 双轴翻转
+    box = {
+      x: (1 - crop.y - crop.h) * wu,
+      y: (1 - crop.x - crop.w) * hu,
+      width: crop.h * wu,
+      height: crop.w * hu,
+    }
+  } else {
+    box = { x: crop.x * wu, y: (1 - crop.y - crop.h) * hu, width: crop.w * wu, height: crop.h * hu }
   }
+  const round = (v) => Math.round(v * 1000) / 1000
+  return { x: round(box.x), y: round(box.y), width: round(box.width), height: round(box.height) }
 }
 
 /**

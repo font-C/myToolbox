@@ -1,6 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { RENDER_SCALE, PREVIEW_WIDTH } from './cropConstants'
+import { normalizeRotation } from './cropMath'
 
 // 全局唯一配置 worker（webview 内）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -30,13 +31,24 @@ export async function closeDoc() {
   }
 }
 
-/** 读取所有页的尺寸信息（pt） */
+/**
+ * 读取所有页的尺寸信息（pt）。
+ * width/height 为可见尺寸（应用 /Rotate 后）；rawWidth/rawHeight 为未旋转用户空间尺寸。
+ */
 export async function getPageInfos(doc) {
   const infos = []
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i)
     const vp = page.getViewport({ scale: 1 })
-    infos.push({ index: i, width: vp.width, height: vp.height })
+    const raw = page.getViewport({ scale: 1, rotation: 0 })
+    infos.push({
+      index: i,
+      width: vp.width,
+      height: vp.height,
+      rawWidth: raw.width,
+      rawHeight: raw.height,
+      rotation: normalizeRotation(page.rotate),
+    })
   }
   return infos
 }
